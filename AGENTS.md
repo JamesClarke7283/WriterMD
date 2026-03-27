@@ -22,3 +22,5 @@
 - Release direction: publish Linux AppImage/DEB/RPM plus macOS DMG and Windows MSI for both `x86_64` and `arm64`.
 - Arch Linux packaging note: Tauri AppImage bundling may require an upstream `linuxdeploy-plugin-appimage` binary on `PATH` even when the `linuxdeploy-appimage` package is installed; prefer placing it in `~/.local/bin`.
 - Arch Linux packaging note: keep an in-repo helper to patch Tauri's cached AppImage tooling for `NO_STRIP` builds and the GTK `gdk-pixbuf` path mismatch.
+- Arch Linux packaging note: after local AppImage bundling, run the in-repo runtime patcher so the AppImage uses the host GTK/WebKit stack instead of the broken bundled GTK runtime.
+- Arch Linux packaging note: the local AppImage save crash was traced to bundled GTK template-resource failures in the AppImage runtime, not the Rust save commands.

@@ -75,6 +75,12 @@ Arch AppImage cache prepared.
 
 Bundle with:
   NO_COLOR=false RUST_BACKTRACE=1 LDAI_VERBOSE=1 NO_STRIP=1 cargo tauri bundle -v -b appimage
+
+Patch the bundled runtime:
+  ./scripts/patch-appimage-arch-runtime.sh target/release/bundle/appimage/WriterMD.AppDir
+
+Verify the patched AppDir:
+  ./scripts/verify-appimage-arch-runtime.sh
 EOF
 }
 

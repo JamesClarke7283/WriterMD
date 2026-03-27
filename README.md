@@ -73,6 +73,7 @@ Tauri's cached AppImage helpers currently need two Arch-specific workarounds in 
 
 - disable stripping because older bundled tooling fails on `.relr.dyn` ELF sections
 - patch the cached GTK helper to tolerate Arch's missing `gdk-pixbuf-2.0/2.10.0` directory
+- replace the broken bundled GTK/WebKit runtime in locally built AppImages with the host Arch runtime after bundling
 
 Prepare the cache once after Tauri has downloaded its AppImage helpers:
 
@@ -85,6 +86,20 @@ Then build the AppImage with:
 ```bash
 NO_COLOR=false RUST_BACKTRACE=1 LDAI_VERBOSE=1 NO_STRIP=1 cargo tauri bundle -v -b appimage
 ```
+
+Patch the generated AppDir so the local Arch AppImage uses the host GTK/WebKit stack:
+
+```bash
+./scripts/patch-appimage-arch-runtime.sh target/release/bundle/appimage/WriterMD.AppDir
+```
+
+Run the smoke check before launching the patched AppImage:
+
+```bash
+./scripts/verify-appimage-arch-runtime.sh
+```
+
+This Arch-only workaround is intentional. The locally bundled GTK runtime currently starts with missing GTK template resources and later crashes on save through `GtkFileChooserDialog`, so the local AppImage now prefers the host Arch GTK/WebKit runtime instead of the broken bundled copy.
 
 ## License
 
