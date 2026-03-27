@@ -85,6 +85,7 @@ struct ChatMessage {
 struct ChatResponse {
     message: String,
     document_edit: Option<String>,
+    diff: Option<String>,
 }
 
 // ── Tauri command args (camelCase for Tauri v2) ──
@@ -1153,14 +1154,24 @@ fn ChatPanel(
             match result {
                 Ok(resp) => {
                     // Apply document edit if present
+                    let had_edit = resp.document_edit.is_some();
                     if let Some(new_doc) = resp.document_edit {
                         set_content.set(new_doc);
                         set_is_dirty.set(true);
                     }
-                    // Add assistant message
+                    // Build assistant message — include diff if available
+                    let mut msg_content = resp.message;
+                    if had_edit {
+                        if let Some(diff_text) = resp.diff {
+                            if !diff_text.trim().is_empty() {
+                                msg_content.push_str("\n\n📝 Changes:\n");
+                                msg_content.push_str(&diff_text);
+                            }
+                        }
+                    }
                     let assistant_msg = ChatMessage {
                         role: "assistant".to_string(),
-                        content: resp.message,
+                        content: msg_content,
                     };
                     set_chat_messages.update(|msgs| msgs.push(assistant_msg));
                 }
@@ -1173,6 +1184,14 @@ fn ChatPanel(
                 }
             }
             set_loading.set(false);
+
+            // Auto-scroll chat to bottom after DOM updates
+            {
+                let doc = web_sys::window().unwrap().document().unwrap();
+                if let Some(el) = doc.query_selector(".chat-messages").ok().flatten() {
+                    el.set_scroll_top(el.scroll_height());
+                }
+            }
         });
     };
 
@@ -1297,11 +1316,32 @@ fn ChatPanel(
                                 let role = msg.role.clone();
                                 let content_text = msg.content.clone();
                                 let is_user = role == "user";
+
+                                // For assistant messages, split out diff section
+                                let (text_part, diff_part) = if !is_user {
+                                    if let Some(idx) = content_text.find("\n\n📝 Changes:\n") {
+                                        let text = content_text[..idx].to_string();
+                                        let diff = content_text[idx + "\n\n📝 Changes:\n".len()..].to_string();
+                                        (text, Some(diff))
+                                    } else {
+                                        (content_text.clone(), None)
+                                    }
+                                } else {
+                                    (content_text.clone(), None)
+                                };
+
+                                let has_diff = diff_part.is_some();
+                                let diff_text = diff_part.unwrap_or_default();
+
                                 view! {
                                     <div class="chat-bubble" class:user=is_user class:assistant=!is_user>
                                         <div class="chat-role">{if is_user { "You" } else { "AI" }}</div>
                                         <div class="chat-content">
-                                            <pre class="chat-text">{content_text}</pre>
+                                            <pre class="chat-text">{text_part}</pre>
+                                            <Show when=move || has_diff>
+                                                <div class="chat-diff-label">"📝 Changes"</div>
+                                                <pre class="chat-diff">{diff_text.clone()}</pre>
+                                            </Show>
                                         </div>
                                     </div>
                                 }.into_any()

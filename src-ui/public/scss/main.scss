@@ -969,6 +969,40 @@ html, body {
   font-family: inherit;
 }
 
+.chat-diff-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 10px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.chat-diff {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-titlebar);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: 'Inter', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  color: var(--text-secondary);
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--separator);
+    border-radius: 2px;
+  }
+}
+
 .chat-typing {
   display: flex;
   align-items: center;

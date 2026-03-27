@@ -1,10 +1,10 @@
 [package]
 name = "src_tauri"
-version = "0.0.0"
+version = "0.1.0"
 description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+authors = ["James David Clarke <james@jamesdavidclarke.com>"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/JamesClarke7283/WriterMD"
 edition = "2024"
 rust-version = "1.85.1"
 
@@ -25,6 +25,7 @@ toml = "0.8"
 dirs = "6"
 reqwest = { version = "0.12", features = ["json"] }
 similar = "2.7.0"
+async-trait = "0.1"
 
 [features]
 # by default Tauri runs in production mode

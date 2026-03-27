@@ -4,17 +4,24 @@
 )]
 
 use langchain_rust::{
-    chain::{Chain, LLMChainBuilder},
+    agent::{AgentExecutor, OpenAiToolAgentBuilder},
+    chain::{options::ChainCallOptions, Chain, LLMChainBuilder},
     fmt_message, fmt_template,
     llm::openai::{OpenAI, OpenAIConfig},
+    memory::SimpleMemory,
     message_formatter,
     prompt::HumanMessagePromptTemplate,
     prompt_args,
     schemas::Message,
     template_fstring,
+    schemas::memory::BaseMemory,
+    tools::Tool,
 };
+use async_trait::async_trait;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri_plugin_dialog::DialogExt;
 
 // ── AI Settings (multi-server, TOML) ──
@@ -67,6 +74,7 @@ struct ChatMessage {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ChatResponse {
     message: String,
     /// If the AI wants to edit the document, this contains the new full content.
@@ -102,6 +110,396 @@ fn build_openai(api_base: &str, api_key: &str, model: &str) -> OpenAI<OpenAIConf
         config = config.with_api_key(api_key);
     }
     OpenAI::default().with_config(config).with_model(model)
+}
+
+// ── Document editing tools for the AI agent ──
+
+/// Shared state between the `ai_chat` command and its tools.
+/// Created fresh for each invocation so tools can read/modify the document.
+#[derive(Clone)]
+struct DocumentState {
+    /// The current document content. Tools read and write through this.
+    content: Arc<std::sync::Mutex<String>>,
+    /// Set to `true` if any tool modified the document during this agent run.
+    was_edited: Arc<std::sync::Mutex<bool>>,
+}
+
+/// Replace the entire document with new content.
+struct EditDocumentTool {
+    state: DocumentState,
+}
+
+#[async_trait]
+impl Tool for EditDocumentTool {
+    fn name(&self) -> String {
+        "edit_document".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Replace the entire document content with new markdown content. \
+         Use this for large structural changes, full rewrites, or when \
+         creating a new document from scratch."
+            .to_string()
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The complete new document content in markdown"
+                }
+            },
+            "required": ["content"]
+        })
+    }
+
+    async fn parse_input(&self, input: &str) -> Value {
+        serde_json::from_str(input).unwrap_or_else(|_| json!({"content": input}))
+    }
+
+    async fn run(&self, input: Value) -> Result<String, Box<dyn std::error::Error>> {
+        let new_content = input["content"]
+            .as_str()
+            .ok_or("Missing 'content' parameter")?;
+        *self.state.content.lock().unwrap() = new_content.to_string();
+        *self.state.was_edited.lock().unwrap() = true;
+        Ok("Document replaced successfully.".to_string())
+    }
+}
+
+/// Find specific text in the document and replace it.
+struct FindAndReplaceTool {
+    state: DocumentState,
+}
+
+#[async_trait]
+impl Tool for FindAndReplaceTool {
+    fn name(&self) -> String {
+        "find_and_replace".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Find specific text in the document and replace it. Use this for \
+         targeted edits like fixing typos, changing specific phrases, or \
+         updating particular sections without rewriting the whole document."
+            .to_string()
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "find": {
+                    "type": "string",
+                    "description": "The exact text to find in the document"
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "The replacement text"
+                }
+            },
+            "required": ["find", "replace"]
+        })
+    }
+
+    async fn parse_input(&self, input: &str) -> Value {
+        serde_json::from_str(input).unwrap_or_else(|_| json!({"input": input}))
+    }
+
+    async fn run(&self, input: Value) -> Result<String, Box<dyn std::error::Error>> {
+        let find = input["find"]
+            .as_str()
+            .ok_or("Missing 'find' parameter")?;
+        let replace = input["replace"]
+            .as_str()
+            .ok_or("Missing 'replace' parameter")?;
+
+        let mut content = self.state.content.lock().unwrap();
+        let count = content.matches(find).count();
+        if count == 0 {
+            return Ok(format!(
+                "Text not found in document. The exact text '{}' does not appear. \
+                 Check the text and try again.",
+                find
+            ));
+        }
+        *content = content.replace(find, replace);
+        *self.state.was_edited.lock().unwrap() = true;
+        Ok(format!(
+            "Replaced {} occurrence(s) of the specified text.",
+            count
+        ))
+    }
+}
+
+/// Insert text at a specific line number.
+struct InsertAtTool {
+    state: DocumentState,
+}
+
+#[async_trait]
+impl Tool for InsertAtTool {
+    fn name(&self) -> String {
+        "insert_at".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Insert text at a specific line number in the document. \
+         Line numbers start at 1. The new text is inserted before \
+         the specified line."
+            .to_string()
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "line": {
+                    "type": "integer",
+                    "description": "The line number to insert before (1-indexed)"
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The text to insert (may include newlines for multiple lines)"
+                }
+            },
+            "required": ["line", "text"]
+        })
+    }
+
+    async fn parse_input(&self, input: &str) -> Value {
+        serde_json::from_str(input).unwrap_or_else(|_| json!({"input": input}))
+    }
+
+    async fn run(&self, input: Value) -> Result<String, Box<dyn std::error::Error>> {
+        let line = input["line"]
+            .as_u64()
+            .ok_or("Missing or invalid 'line' parameter")? as usize;
+        let text = input["text"]
+            .as_str()
+            .ok_or("Missing 'text' parameter")?;
+
+        let mut content = self.state.content.lock().unwrap();
+        let mut lines: Vec<&str> = content.lines().collect();
+
+        // Clamp to valid range (1-indexed, insert before the line)
+        let idx = if line == 0 {
+            0
+        } else {
+            (line - 1).min(lines.len())
+        };
+
+        // Insert each line of the new text
+        let new_lines: Vec<&str> = text.lines().collect();
+        for (i, new_line) in new_lines.iter().enumerate() {
+            lines.insert(idx + i, new_line);
+        }
+
+        *content = lines.join("\n");
+        *self.state.was_edited.lock().unwrap() = true;
+        Ok(format!(
+            "Inserted {} line(s) at line {}.",
+            new_lines.len(),
+            line
+        ))
+    }
+}
+
+/// Delete a range of lines from the document.
+struct DeleteLinesTool {
+    state: DocumentState,
+}
+
+#[async_trait]
+impl Tool for DeleteLinesTool {
+    fn name(&self) -> String {
+        "delete_lines".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Delete a range of lines from the document. Line numbers are \
+         1-indexed. Both start and end are inclusive."
+            .to_string()
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "start_line": {
+                    "type": "integer",
+                    "description": "First line to delete (1-indexed, inclusive)"
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "Last line to delete (1-indexed, inclusive)"
+                }
+            },
+            "required": ["start_line", "end_line"]
+        })
+    }
+
+    async fn parse_input(&self, input: &str) -> Value {
+        serde_json::from_str(input).unwrap_or_else(|_| json!({"input": input}))
+    }
+
+    async fn run(&self, input: Value) -> Result<String, Box<dyn std::error::Error>> {
+        let start = input["start_line"]
+            .as_u64()
+            .ok_or("Missing 'start_line' parameter")? as usize;
+        let end = input["end_line"]
+            .as_u64()
+            .ok_or("Missing 'end_line' parameter")? as usize;
+
+        if start == 0 || end == 0 || start > end {
+            return Ok("Invalid line range. start_line and end_line must be >= 1, and start_line <= end_line.".to_string());
+        }
+
+        let mut content = self.state.content.lock().unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        let total = lines.len();
+        let s = (start - 1).min(total);
+        let e = end.min(total);
+        let deleted = e - s;
+
+        let remaining: Vec<&str> = lines[..s]
+            .iter()
+            .chain(lines[e..].iter())
+            .copied()
+            .collect();
+        *content = remaining.join("\n");
+        *self.state.was_edited.lock().unwrap() = true;
+        Ok(format!("Deleted {} line(s) (lines {}-{}).", deleted, start, end))
+    }
+}
+
+/// Replace a range of lines with new content.
+struct ReplaceLinesTool {
+    state: DocumentState,
+}
+
+#[async_trait]
+impl Tool for ReplaceLinesTool {
+    fn name(&self) -> String {
+        "replace_lines".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Replace a range of lines in the document with new content. \
+         Line numbers are 1-indexed and both start and end are inclusive. \
+         Use this for precise block-level editing when you know the exact \
+         line numbers."
+            .to_string()
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "start_line": {
+                    "type": "integer",
+                    "description": "First line to replace (1-indexed, inclusive)"
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "Last line to replace (1-indexed, inclusive)"
+                },
+                "new_content": {
+                    "type": "string",
+                    "description": "The replacement text (may include newlines for multiple lines)"
+                }
+            },
+            "required": ["start_line", "end_line", "new_content"]
+        })
+    }
+
+    async fn parse_input(&self, input: &str) -> Value {
+        serde_json::from_str(input).unwrap_or_else(|_| json!({"input": input}))
+    }
+
+    async fn run(&self, input: Value) -> Result<String, Box<dyn std::error::Error>> {
+        let start = input["start_line"]
+            .as_u64()
+            .ok_or("Missing 'start_line' parameter")? as usize;
+        let end = input["end_line"]
+            .as_u64()
+            .ok_or("Missing 'end_line' parameter")? as usize;
+        let new_text = input["new_content"]
+            .as_str()
+            .ok_or("Missing 'new_content' parameter")?;
+
+        if start == 0 || end == 0 || start > end {
+            return Ok("Invalid line range. start_line and end_line must be >= 1, and start_line <= end_line.".to_string());
+        }
+
+        let mut content = self.state.content.lock().unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        let total = lines.len();
+        let s = (start - 1).min(total);
+        let e = end.min(total);
+
+        let mut result: Vec<&str> = lines[..s].to_vec();
+        let new_lines: Vec<&str> = new_text.lines().collect();
+        result.extend_from_slice(&new_lines);
+        result.extend_from_slice(&lines[e..]);
+        *content = result.join("\n");
+        *self.state.was_edited.lock().unwrap() = true;
+        Ok(format!(
+            "Replaced lines {}-{} with {} new line(s).",
+            start,
+            end,
+            new_lines.len()
+        ))
+    }
+}
+
+/// Read the current document content with line numbers.
+struct GetDocumentTool {
+    state: DocumentState,
+}
+
+#[async_trait]
+impl Tool for GetDocumentTool {
+    fn name(&self) -> String {
+        "get_document".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Read the current document content with line numbers. \
+         Always call this first before making line-based edits \
+         so you have accurate line numbers. Useful to see the \
+         latest state after making edits in a multi-step session."
+            .to_string()
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {}
+        })
+    }
+
+    async fn parse_input(&self, input: &str) -> Value {
+        serde_json::from_str(input).unwrap_or_else(|_| json!({}))
+    }
+
+    async fn run(&self, _input: Value) -> Result<String, Box<dyn std::error::Error>> {
+        let content = self.state.content.lock().unwrap().clone();
+        if content.is_empty() {
+            Ok("(empty document)".to_string())
+        } else {
+            // Return content with line numbers for precise editing
+            let numbered: String = content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| format!("{}| {}", i + 1, line))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok(numbered)
+        }
+    }
 }
 
 // ── Tauri Commands ──
@@ -188,7 +586,7 @@ async fn list_models(api_base: String, api_key: String) -> Result<Vec<String>, S
 }
 
 /// Chat with the AI assistant. Supports conversation history.
-/// When edit_mode is true, the AI can edit the document via <DOCUMENT_EDIT> tags.
+/// When `edit_mode` is true, the AI uses tool calling to edit the document.
 /// When false, the AI only chats without making changes.
 #[tauri::command]
 async fn ai_chat(
@@ -217,98 +615,162 @@ async fn ai_chat(
 
     let user_message = recent.last().map(|m| m.content.clone()).unwrap_or_default();
 
-    let edit_instructions = if edit_mode {
-        "- When the user asks you to make changes to the document, you MUST include the full edited document \
-           wrapped in <DOCUMENT_EDIT> tags. Example:\n\
-           <DOCUMENT_EDIT>\n# New Title\nNew content here...\n</DOCUMENT_EDIT>\n\
-         - You can include explanation text BEFORE or AFTER the edit tags.\n\
-         - Only include <DOCUMENT_EDIT> tags when you are actually changing the document.\n\
-         - Always produce well-formatted markdown inside the edit tags."
+    let doc_display = if document_content.is_empty() {
+        "(empty document)"
     } else {
-        "- IMPORTANT: You are in CHAT-ONLY mode. Do NOT edit the document. \
-         Do NOT include <DOCUMENT_EDIT> tags. Only discuss, advise, and answer questions about the document."
+        &document_content
+    };
+    let history_display = if history.is_empty() {
+        "(new conversation)"
+    } else {
+        &history
     };
 
-    let system_prompt = format!(
-        "You are an expert markdown writing assistant embedded in WriterMD, a markdown editor.\n\
-         You help the user write, edit, and structure their documents.\n\n\
-         CURRENT DOCUMENT:\n```markdown\n{}\n```\n\n\
-         CONVERSATION HISTORY:\n{}\n\n\
-         INSTRUCTIONS:\n\
-         - Respond conversationally to help the user with their document.\n\
-         {}",
-        if document_content.is_empty() {
-            "(empty document)"
-        } else {
-            &document_content
-        },
-        if history.is_empty() {
-            "(new conversation)"
-        } else {
-            &history
-        },
-        edit_instructions
-    );
+    if edit_mode {
+        // ── Agent path: AI can edit the document via tool calls ──
 
-    let prompt_template = message_formatter![
-        fmt_message!(Message::new_system_message(&system_prompt)),
-        fmt_template!(HumanMessagePromptTemplate::new(template_fstring!(
-            "{input}", "input"
-        )))
-    ];
+        let doc_state = DocumentState {
+            content: Arc::new(std::sync::Mutex::new(document_content.clone())),
+            was_edited: Arc::new(std::sync::Mutex::new(false)),
+        };
 
-    let chain = LLMChainBuilder::new()
-        .prompt(prompt_template)
-        .llm(llm)
-        .build()
-        .map_err(|e| format!("Failed to build chain: {}", e))?;
+        let tools: Vec<Arc<dyn Tool>> = vec![
+            Arc::new(GetDocumentTool {
+                state: doc_state.clone(),
+            }),
+            Arc::new(FindAndReplaceTool {
+                state: doc_state.clone(),
+            }),
+            Arc::new(InsertAtTool {
+                state: doc_state.clone(),
+            }),
+            Arc::new(ReplaceLinesTool {
+                state: doc_state.clone(),
+            }),
+            Arc::new(DeleteLinesTool {
+                state: doc_state.clone(),
+            }),
+            Arc::new(EditDocumentTool {
+                state: doc_state.clone(),
+            }),
+        ];
 
-    let result = chain
-        .invoke(prompt_args! { "input" => user_message })
-        .await
-        .map_err(|e| format!("AI chat failed: {}", e))?;
+        let system_prompt = format!(
+            "You are an expert markdown writing assistant embedded in WriterMD, a markdown editor.\n\
+             You help the user write, edit, and structure their documents.\n\n\
+             CURRENT DOCUMENT:\n```markdown\n{}\n```\n\n\
+             CONVERSATION HISTORY:\n{}\n\n\
+             EDITING WORKFLOW:\n\
+             1. ALWAYS call get_document first to see the latest content with line numbers.\n\
+             2. Choose the right tool for the job:\n\
+                - find_and_replace: best for fixing typos, changing specific phrases, renaming things.\n\
+                - replace_lines: best for rewriting a specific section when you know the line numbers.\n\
+                - insert_at: best for adding new content at a specific location.\n\
+                - delete_lines: best for removing sections.\n\
+                - edit_document: ONLY for full rewrites or creating a document from scratch.\n\
+             3. You can chain multiple tool calls for complex, multi-step edits.\n\
+             4. After editing, always confirm what changed in a brief, natural response.\n\n\
+             IMPORTANT RULES:\n\
+             - Prefer surgical tools (find_and_replace, replace_lines) over edit_document.\n\
+             - For find_and_replace, use exact text matches from the document.\n\
+             - Be concise in your responses. Don't repeat the entire document back.",
+            doc_display, history_display
+        );
 
-    // Parse for document edits
-    let (message, document_edit) = parse_document_edit(&result);
-    let mut diff = None;
+        // Pre-populate memory with conversation history
+        let mut memory = SimpleMemory::new();
+        for msg in &recent[..recent.len().saturating_sub(1)] {
+            match msg.role.as_str() {
+                "user" => memory.add_user_message(&msg.content),
+                "assistant" => memory.add_ai_message(&msg.content),
+                _ => {}
+            }
+        }
 
-    if let Some(ref new_content) = document_edit {
-        diff = Some(
-            similar::TextDiff::from_lines(&document_content, new_content)
+        let agent = OpenAiToolAgentBuilder::new()
+            .tools(&tools)
+            .prefix(&system_prompt)
+            .options(ChainCallOptions::new().with_max_tokens(4096))
+            .build(llm)
+            .map_err(|e| format!("Failed to build agent: {}", e))?;
+
+        let memory_arc: Arc<tokio::sync::Mutex<dyn langchain_rust::schemas::memory::BaseMemory>> =
+            Arc::new(tokio::sync::Mutex::new(memory));
+
+        let executor = AgentExecutor::from_agent(agent)
+            .with_memory(memory_arc)
+            .with_max_iterations(8);
+
+        let result = executor
+            .invoke(prompt_args! { "input" => user_message })
+            .await
+            .map_err(|e| format!("AI chat failed: {}", e))?;
+
+        // Read back shared state to see if the document was edited
+        let was_edited = *doc_state.was_edited.lock().unwrap();
+        let (document_edit, diff) = if was_edited {
+            let new_content = doc_state.content.lock().unwrap().clone();
+            let diff = similar::TextDiff::from_lines(&document_content, &new_content)
                 .unified_diff()
                 .context_radius(3)
-                .to_string(),
+                .to_string();
+            (Some(new_content), Some(diff))
+        } else {
+            (None, None)
+        };
+
+        let message = if was_edited && !result.is_empty() {
+            format!("{}\n\n✅ Document updated.", result)
+        } else if was_edited {
+            "✅ Document updated.".to_string()
+        } else {
+            result
+        };
+
+        Ok(ChatResponse {
+            message,
+            document_edit,
+            diff,
+        })
+    } else {
+        // ── Simple chain path: chat-only, no document editing ──
+
+        let system_prompt = format!(
+            "You are an expert markdown writing assistant embedded in WriterMD, a markdown editor.\n\
+             You help the user write, edit, and structure their documents.\n\n\
+             CURRENT DOCUMENT:\n```markdown\n{}\n```\n\n\
+             CONVERSATION HISTORY:\n{}\n\n\
+             INSTRUCTIONS:\n\
+             - Respond conversationally to help the user with their document.\n\
+             - IMPORTANT: You are in CHAT-ONLY mode. Do NOT edit the document. \
+             Only discuss, advise, and answer questions about the document.",
+            doc_display, history_display
         );
+
+        let prompt_template = message_formatter![
+            fmt_message!(Message::new_system_message(&system_prompt)),
+            fmt_template!(HumanMessagePromptTemplate::new(template_fstring!(
+                "{input}", "input"
+            )))
+        ];
+
+        let chain = LLMChainBuilder::new()
+            .prompt(prompt_template)
+            .llm(llm)
+            .build()
+            .map_err(|e| format!("Failed to build chain: {}", e))?;
+
+        let result = chain
+            .invoke(prompt_args! { "input" => user_message })
+            .await
+            .map_err(|e| format!("AI chat failed: {}", e))?;
+
+        Ok(ChatResponse {
+            message: result,
+            document_edit: None,
+            diff: None,
+        })
     }
-
-    Ok(ChatResponse {
-        message,
-        document_edit,
-        diff,
-    })
-}
-
-/// Parse AI response for <DOCUMENT_EDIT> tags.
-fn parse_document_edit(response: &str) -> (String, Option<String>) {
-    let start_tag = "<DOCUMENT_EDIT>";
-    let end_tag = "</DOCUMENT_EDIT>";
-
-    if let Some(start) = response.find(start_tag) {
-        if let Some(end) = response.find(end_tag) {
-            let edit_content = response[start + start_tag.len()..end].trim().to_string();
-            let before = response[..start].trim();
-            let after = response[end + end_tag.len()..].trim();
-            let message = format!("{}\n{}", before, after).trim().to_string();
-            let display = if message.is_empty() {
-                "✅ Document updated.".to_string()
-            } else {
-                format!("{}\n\n✅ Document updated.", message)
-            };
-            return (display, Some(edit_content));
-        }
-    }
-
-    (response.to_string(), None)
 }
 
 /// Amend selected text based on user instructions.
