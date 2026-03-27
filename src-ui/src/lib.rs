@@ -1,5 +1,7 @@
-use leptos::prelude::*;
+pub mod wysiwym;
+
 use leptos::ev;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri_wasm::api::core::invoke;
 use wasm_bindgen::JsCast;
@@ -52,7 +54,11 @@ struct AiSettings {
 
 impl Default for AiSettings {
     fn default() -> Self {
-        Self { servers: vec![], active_index: None, last_model: None }
+        Self {
+            servers: vec![],
+            active_index: None,
+            last_model: None,
+        }
     }
 }
 
@@ -140,21 +146,96 @@ struct InsertItem {
 }
 
 const INSERT_ITEMS: &[InsertItem] = &[
-    InsertItem { label: "Heading 1", icon: "H1", desc: "Large heading", snippet: "# " },
-    InsertItem { label: "Heading 2", icon: "H2", desc: "Medium heading", snippet: "## " },
-    InsertItem { label: "Heading 3", icon: "H3", desc: "Small heading", snippet: "### " },
-    InsertItem { label: "Bold", icon: "B", desc: "Strong text", snippet: "**bold**" },
-    InsertItem { label: "Italic", icon: "I", desc: "Emphasized text", snippet: "*italic*" },
-    InsertItem { label: "Link", icon: "L", desc: "Hyperlink", snippet: "[text](url)" },
-    InsertItem { label: "Image", icon: "Img", desc: "Embedded image", snippet: "![alt](url)" },
-    InsertItem { label: "Code Block", icon: "</>", desc: "Multiline code", snippet: "```\ncode\n```" },
-    InsertItem { label: "Inline Code", icon: "`", desc: "Inline code snippet", snippet: "`code`" },
-    InsertItem { label: "Blockquote", icon: "\"", desc: "Quoted text", snippet: "> " },
-    InsertItem { label: "Bullet List", icon: "•", desc: "Unordered list", snippet: "- item\n- item\n- item" },
-    InsertItem { label: "Numbered List", icon: "1.", desc: "Ordered list", snippet: "1. item\n2. item\n3. item" },
-    InsertItem { label: "Table", icon: "Tbl", desc: "Markdown table", snippet: "| Col 1 | Col 2 |\n|-------|-------|\n| A     | B     |" },
-    InsertItem { label: "HR", icon: "---", desc: "Horizontal rule", snippet: "---" },
-    InsertItem { label: "Task List", icon: "☑", desc: "Checkboxes", snippet: "- [ ] task\n- [x] done" },
+    InsertItem {
+        label: "Heading 1",
+        icon: "H1",
+        desc: "Large heading",
+        snippet: "# ",
+    },
+    InsertItem {
+        label: "Heading 2",
+        icon: "H2",
+        desc: "Medium heading",
+        snippet: "## ",
+    },
+    InsertItem {
+        label: "Heading 3",
+        icon: "H3",
+        desc: "Small heading",
+        snippet: "### ",
+    },
+    InsertItem {
+        label: "Bold",
+        icon: "B",
+        desc: "Strong text",
+        snippet: "**bold**",
+    },
+    InsertItem {
+        label: "Italic",
+        icon: "I",
+        desc: "Emphasized text",
+        snippet: "*italic*",
+    },
+    InsertItem {
+        label: "Link",
+        icon: "L",
+        desc: "Hyperlink",
+        snippet: "[text](url)",
+    },
+    InsertItem {
+        label: "Image",
+        icon: "Img",
+        desc: "Embedded image",
+        snippet: "![alt](url)",
+    },
+    InsertItem {
+        label: "Code Block",
+        icon: "</>",
+        desc: "Multiline code",
+        snippet: "```\ncode\n```",
+    },
+    InsertItem {
+        label: "Inline Code",
+        icon: "`",
+        desc: "Inline code snippet",
+        snippet: "`code`",
+    },
+    InsertItem {
+        label: "Blockquote",
+        icon: "\"",
+        desc: "Quoted text",
+        snippet: "> ",
+    },
+    InsertItem {
+        label: "Bullet List",
+        icon: "•",
+        desc: "Unordered list",
+        snippet: "- item\n- item\n- item",
+    },
+    InsertItem {
+        label: "Numbered List",
+        icon: "1.",
+        desc: "Ordered list",
+        snippet: "1. item\n2. item\n3. item",
+    },
+    InsertItem {
+        label: "Table",
+        icon: "Tbl",
+        desc: "Markdown table",
+        snippet: "| Col 1 | Col 2 |\n|-------|-------|\n| A     | B     |",
+    },
+    InsertItem {
+        label: "HR",
+        icon: "---",
+        desc: "Horizontal rule",
+        snippet: "---",
+    },
+    InsertItem {
+        label: "Task List",
+        icon: "☑",
+        desc: "Checkboxes",
+        snippet: "- [ ] task\n- [x] done",
+    },
 ];
 
 // ── App component ──
@@ -205,19 +286,23 @@ pub fn App() -> impl IntoView {
         });
     });
 
-
     let display_name = Memo::new(move |_| {
         let name = match file_path.get() {
             Some(p) => filename_from_path(&p),
             None => "Untitled-1".to_string(),
         };
-        if is_dirty.get() { format!("● {}", name) } else { name }
+        if is_dirty.get() {
+            format!("● {}", name)
+        } else {
+            name
+        }
     });
 
     // File operations
     let do_open = move || {
         leptos::task::spawn_local(async move {
-            let result: Option<OpenFileResponse> = invoke("open_file", &EmptyArgs {}).await.unwrap();
+            let result: Option<OpenFileResponse> =
+                invoke("open_file", &EmptyArgs {}).await.unwrap_or(None);
             if let Some(resp) = result {
                 set_content.set(resp.content);
                 set_file_path.set(Some(resp.path));
@@ -229,7 +314,9 @@ pub fn App() -> impl IntoView {
     let do_save_as = move || {
         let text = content.get();
         leptos::task::spawn_local(async move {
-            let result: Option<String> = invoke("save_file_as", &SaveFileAsArgs { content: text }).await.unwrap();
+            let result: Option<String> = invoke("save_file_as", &SaveFileAsArgs { content: text })
+                .await
+                .unwrap_or(None);
             if let Some(new_path) = result {
                 set_file_path.set(Some(new_path));
                 set_is_dirty.set(false);
@@ -243,11 +330,21 @@ pub fn App() -> impl IntoView {
         match path {
             Some(p) => {
                 leptos::task::spawn_local(async move {
-                    let _: () = invoke("save_file", &SaveFileArgs { path: p, content: text }).await.unwrap();
+                    let _: () = invoke(
+                        "save_file",
+                        &SaveFileArgs {
+                            path: p,
+                            content: text,
+                        },
+                    )
+                    .await
+                    .unwrap_or(());
                     set_is_dirty.set(false);
                 });
             }
-            None => { do_save_as(); }
+            None => {
+                do_save_as();
+            }
         }
     };
 
@@ -277,7 +374,15 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-        <div class="app-container">
+        <div
+            class="app-container"
+            on:keydown=move |ev: ev::KeyboardEvent| {
+                if (ev.ctrl_key() || ev.meta_key()) && (ev.key() == "s" || ev.key() == "S") {
+                    ev.prevent_default();
+                    do_save();
+                }
+            }
+        >
             <TitleBar
                 display_name=display_name
                 content=content
@@ -444,12 +549,21 @@ fn MenuOverlay(
                 <button class="menu-item" on:click=move |_| { on_save(); set_is_open.set(false); }>"💾 Save"</button>
                 <button class="menu-item" on:click=move |_| { on_save_as(); set_is_open.set(false); }>"📁 Save As"</button>
                 <div class="menu-separator"></div>
-                <button class="menu-item" on:click=move |_| { set_chat_panel_open.update(|v| *v = !*v); set_is_open.set(false); }>"🤖 LLM Panel"</button>
+                <button class="menu-item" on:click=move |_| { set_chat_panel_open.update(|v| *v = !*v); set_is_open.set(false); }>"🤖 AI Chat"</button>
                 <button class="menu-item" on:click=move |_| { set_settings_open.set(true); set_is_open.set(false); }>"⚙️ Settings"</button>
                 <div class="menu-separator"></div>
                 <button class="menu-item" on:click=move |_| set_is_dark.set(!is_dark.get())>
                     {move || if is_dark.get() { "☀️ Light Theme" } else { "🌙 Dark Theme" }}
                 </button>
+                <div class="menu-separator"></div>
+                <div class="menu-help">
+                    <div class="menu-help-title">"Keybinds"</div>
+                    <div class="menu-help-item"><span>"Ctrl/Cmd+S"</span><span>"Save"</span></div>
+                    <div class="menu-help-item"><span>"Ctrl/Cmd+Z"</span><span>"Undo"</span></div>
+                    <div class="menu-help-item"><span>"Ctrl/Cmd+X"</span><span>"Redo"</span></div>
+                    <div class="menu-help-item"><span>"Ctrl/Cmd+R"</span><span>"Toggle Raw Line"</span></div>
+                    <div class="menu-help-item"><span>"Arrow Up/Down"</span><span>"Move Between Lines"</span></div>
+                </div>
             </div>
         </Show>
     }
@@ -523,8 +637,12 @@ fn SettingsDialog(
         leptos::task::spawn_local(async move {
             let result: Result<bool, _> = invoke(
                 "verify_connection",
-                &VerifyConnectionArgs { api_base: base, api_key: key },
-            ).await;
+                &VerifyConnectionArgs {
+                    api_base: base,
+                    api_key: key,
+                },
+            )
+            .await;
             match result {
                 Ok(_) => set_verify_status.set(Some(Ok(()))),
                 Err(e) => set_verify_status.set(Some(Err(format!("{}", e)))),
@@ -565,11 +683,16 @@ fn SettingsDialog(
             if servers.is_empty() {
                 set_local_active.set(None);
             } else if let Some(a) = active {
-                if a == idx { set_local_active.set(Some(0)); }
-                else if a > idx { set_local_active.set(Some(a - 1)); }
+                if a == idx {
+                    set_local_active.set(Some(0));
+                } else if a > idx {
+                    set_local_active.set(Some(a - 1));
+                }
             }
             set_local_servers.set(servers);
-            if editing_idx.get() == Some(idx) { set_editing_idx.set(None); }
+            if editing_idx.get() == Some(idx) {
+                set_editing_idx.set(None);
+            }
         }
     };
 
@@ -584,8 +707,11 @@ fn SettingsDialog(
         leptos::task::spawn_local(async move {
             let _: Result<(), _> = invoke(
                 "save_ai_settings",
-                &SaveAiSettingsArgs { settings: settings_c.clone() },
-            ).await;
+                &SaveAiSettingsArgs {
+                    settings: settings_c.clone(),
+                },
+            )
+            .await;
             set_ai_settings.set(settings_c);
             set_saving.set(false);
             set_is_open.set(false);
@@ -749,7 +875,7 @@ fn ContextMenu(
                         <button class="ctx-item" on:click=move |_| {
                             // Get the selected text from the document
                             let doc = web_sys::window().unwrap().document().unwrap();
-                            if let Some(textarea) = doc.query_selector("textarea.editor-textarea").ok().flatten() {
+                            if let Some(textarea) = doc.query_selector("textarea.editor-source").ok().flatten() {
                                 let ta: web_sys::HtmlTextAreaElement = textarea.unchecked_into();
                                 let value = ta.value();
                                 let selected = value[sel_start..sel_end].to_string();
@@ -790,7 +916,9 @@ fn AmendDialog(
             None => return,
         };
         let instr = instruction.get();
-        if instr.trim().is_empty() { return; }
+        if instr.trim().is_empty() {
+            return;
+        }
         let model = selected_model.get();
         if model.is_empty() {
             set_error.set(Some("Select a model in the LLM Panel first.".to_string()));
@@ -823,7 +951,8 @@ fn AmendDialog(
                     api_key: server.api_key,
                     model,
                 },
-            ).await;
+            )
+            .await;
 
             match result {
                 Ok(amended) => {
@@ -925,8 +1054,13 @@ fn ChatPanel(
     let filtered_models = Memo::new(move |_| {
         let filter = model_filter.get().to_lowercase();
         let all = available_models.get();
-        if filter.is_empty() { all }
-        else { all.into_iter().filter(|m| m.to_lowercase().contains(&filter)).collect() }
+        if filter.is_empty() {
+            all
+        } else {
+            all.into_iter()
+                .filter(|m| m.to_lowercase().contains(&filter))
+                .collect()
+        }
     });
 
     // Load models when panel opens
@@ -940,8 +1074,12 @@ fn ChatPanel(
                 leptos::task::spawn_local(async move {
                     let result: Result<Vec<String>, _> = invoke(
                         "list_models",
-                        &ListModelsArgs { api_base: base, api_key: key },
-                    ).await;
+                        &ListModelsArgs {
+                            api_base: base,
+                            api_key: key,
+                        },
+                    )
+                    .await;
                     if let Ok(models) = result {
                         set_available_models.set(models);
                     }
@@ -961,16 +1099,23 @@ fn ChatPanel(
         leptos::task::spawn_local(async move {
             let _: Result<(), _> = invoke(
                 "save_ai_settings",
-                &SaveAiSettingsArgs { settings: settings_c },
-            ).await;
+                &SaveAiSettingsArgs {
+                    settings: settings_c,
+                },
+            )
+            .await;
         });
     };
 
     let do_send = move || {
         let msg = input_text.get();
-        if msg.trim().is_empty() || loading.get() { return; }
+        if msg.trim().is_empty() || loading.get() {
+            return;
+        }
         let model = selected_model.get();
-        if model.is_empty() { return; }
+        if model.is_empty() {
+            return;
+        }
 
         let settings = ai_settings.get();
         let server = match settings.active_server() {
@@ -979,7 +1124,10 @@ fn ChatPanel(
         };
 
         // Add user message to history
-        let user_msg = ChatMessage { role: "user".to_string(), content: msg.clone() };
+        let user_msg = ChatMessage {
+            role: "user".to_string(),
+            content: msg.clone(),
+        };
         set_chat_messages.update(|msgs| msgs.push(user_msg));
         set_input_text.set(String::new());
         set_loading.set(true);
@@ -999,7 +1147,8 @@ fn ChatPanel(
                     api_key: server.api_key,
                     model,
                 },
-            ).await;
+            )
+            .await;
 
             match result {
                 Ok(resp) => {
@@ -1009,11 +1158,17 @@ fn ChatPanel(
                         set_is_dirty.set(true);
                     }
                     // Add assistant message
-                    let assistant_msg = ChatMessage { role: "assistant".to_string(), content: resp.message };
+                    let assistant_msg = ChatMessage {
+                        role: "assistant".to_string(),
+                        content: resp.message,
+                    };
                     set_chat_messages.update(|msgs| msgs.push(assistant_msg));
                 }
                 Err(e) => {
-                    let err_msg = ChatMessage { role: "assistant".to_string(), content: format!("⚠️ Error: {}", e) };
+                    let err_msg = ChatMessage {
+                        role: "assistant".to_string(),
+                        content: format!("⚠️ Error: {}", e),
+                    };
                     set_chat_messages.update(|msgs| msgs.push(err_msg));
                 }
             }
@@ -1025,20 +1180,45 @@ fn ChatPanel(
         set_chat_messages.set(vec![]);
     };
 
+    let mode_label = move || {
+        if edit_mode.get() {
+            "Edit mode"
+        } else {
+            "Chat mode"
+        }
+    };
+
     view! {
         <Show when=move || is_open.get()>
             <div class="chat-panel">
                 <div class="chat-panel-header">
-                    <span class="chat-panel-title">"🤖 LLM Panel"</span>
+                    <div class="chat-panel-heading">
+                        <span class="chat-panel-title">"AI Chat"</span>
+                        <span class="chat-panel-subtitle">
+                            {mode_label}
+                            " "
+                            {move || if edit_mode.get() { "lets the assistant apply document changes." } else { "keeps the assistant discussion-only." }}
+                        </span>
+                    </div>
                     <div class="chat-header-actions">
-                        <button
-                            class="edit-toggle"
-                            class:active=move || edit_mode.get()
-                            on:click=move |_| set_edit_mode.set(!edit_mode.get())
-                            title=move || if edit_mode.get() { "Edit mode ON — AI can modify your document" } else { "Chat mode — AI will only discuss, not edit" }
-                        >
-                            {move || if edit_mode.get() { "✏️ Edit" } else { "💬 Chat" }}
-                        </button>
+                        <div class="chat-mode-switch" role="tablist" aria-label="AI mode">
+                            <button
+                                class="chat-mode-btn"
+                                class:active=move || !edit_mode.get()
+                                on:click=move |_| set_edit_mode.set(false)
+                                title="Chat mode — AI will only discuss, not edit"
+                            >
+                                "Chat"
+                            </button>
+                            <button
+                                class="chat-mode-btn"
+                                class:active=move || edit_mode.get()
+                                on:click=move |_| set_edit_mode.set(true)
+                                title="Edit mode — AI can modify your document"
+                            >
+                                "Edit"
+                            </button>
+                        </div>
                         <button class="chat-header-btn" on:click=move |_| clear_chat() title="Clear chat">"🗑️"</button>
                         <button class="chat-header-btn" on:click=move |_| set_is_open.set(false) title="Close">"✕"</button>
                     </div>
@@ -1173,6 +1353,59 @@ fn ChatPanel(
 // ── Editor with @ Insert Menu + right-click ──
 
 #[component]
+fn InsertMenuPopup(
+    insert_menu: ReadSignal<Option<(i32, i32, usize)>>,
+    set_insert_menu: WriteSignal<Option<(i32, i32, usize)>>,
+    filter_text: ReadSignal<String>,
+    #[prop(into)] insert_item: Callback<&'static str, ()>,
+) -> impl IntoView {
+    let filtered_items = move || {
+        let query = filter_text.get().to_lowercase();
+        INSERT_ITEMS
+            .iter()
+            .filter(|item| item.label.to_lowercase().contains(&query))
+            .collect::<Vec<_>>()
+    };
+
+    view! {
+        <Show when=move || insert_menu.get().is_some()>
+            {move || {
+                let (x, y, _) = insert_menu.get().unwrap();
+                let style = format!("left: {}px; top: {}px;", x, y);
+
+                view! {
+                    <div class="insert-menu-backdrop" on:click=move |_| set_insert_menu.set(None)></div>
+                    <div class="insert-menu" style=style>
+                        <div class="insert-menu-header">
+                            <span class="insert-menu-title">"Insert"</span>
+                            <span class="insert-menu-hint">"Press Esc to close"</span>
+                        </div>
+                        <div class="insert-menu-list">
+                            <For
+                                each=filtered_items
+                                key=|item| item.label
+                                children={move |item| {
+                                    let snippet = item.snippet;
+                                    view! {
+                                        <button class="insert-menu-item" on:click=move |_| insert_item.run(snippet)>
+                                            <div class="insert-menu-item-icon">{item.icon.to_string()}</div>
+                                            <div class="insert-menu-item-text">
+                                                <div class="insert-menu-item-label">{item.label.to_string()}</div>
+                                                <div class="insert-menu-item-desc">{item.desc.to_string()}</div>
+                                            </div>
+                                        </button>
+                                    }
+                                }}
+                            />
+                        </div>
+                    </div>
+                }
+            }}
+        </Show>
+    }
+}
+
+#[component]
 fn Editor(
     content: ReadSignal<String>,
     set_content: WriteSignal<String>,
@@ -1181,79 +1414,110 @@ fn Editor(
     _ctx_menu: ReadSignal<Option<ContextMenuState>>,
     set_ctx_menu: WriteSignal<Option<ContextMenuState>>,
 ) -> impl IntoView {
+    let undo_stack = RwSignal::new(Vec::<String>::new());
+    let redo_stack = RwSignal::new(Vec::<String>::new());
+    undo_stack.update(|s| s.push(content.get_untracked()));
+    let editor_state = wysiwym::EditorState::new(&content.get_untracked());
     let (insert_menu, set_insert_menu) = signal::<Option<(i32, i32, usize)>>(None);
     let (filter_text, set_filter_text) = signal(String::new());
 
-    let on_input = move |ev: ev::Event| {
-        let val = event_target_value(&ev);
-        set_content.set(val.clone());
-        set_is_dirty.set(true);
-
-        let target = ev.target().unwrap().unchecked_into::<web_sys::HtmlTextAreaElement>();
-        let cursor = target.selection_start().unwrap().unwrap_or(0) as usize;
-
-        if cursor > 0 && val.as_bytes().get(cursor - 1) == Some(&b'@') {
-            // Position the insert menu near the top-left of the editor
-            set_insert_menu.set(Some((100, 100, cursor)));
-            set_filter_text.set(String::new());
-        } else if insert_menu.get().is_some() {
-            if let Some((_, _, at_pos)) = insert_menu.get() {
-                if cursor > at_pos {
-                    let typed = &val[at_pos..cursor];
-                    set_filter_text.set(typed.to_string());
-                } else {
-                    set_insert_menu.set(None);
-                }
-            }
+    Effect::new(move |_| {
+        let current_text = content.get();
+        if current_text != editor_state.to_string() {
+            editor_state.sync_from_content(&current_text);
         }
-    };
-
-    let on_contextmenu = move |ev: ev::MouseEvent| {
-        let target = ev.target().unwrap().unchecked_into::<web_sys::HtmlTextAreaElement>();
-        let start = target.selection_start().unwrap().unwrap_or(0) as usize;
-        let end = target.selection_end().unwrap().unwrap_or(0) as usize;
-
-        if end > start && ai_settings.get().has_active_connection() {
-            ev.prevent_default();
-            set_ctx_menu.set(Some(ContextMenuState {
-                x: ev.client_x(),
-                y: ev.client_y(),
-                sel_start: start,
-                sel_end: end,
-            }));
-        }
-    };
-
-    let on_keydown = move |ev: ev::KeyboardEvent| {
-        if ev.key() == "Escape" {
-            set_insert_menu.set(None);
-        }
-    };
+    });
 
     let insert_item = move |snippet: &str| {
         if let Some((_, _, at_pos)) = insert_menu.get() {
-            let val = content.get();
-            let cursor = at_pos;
-            let before = &val[..cursor - 1]; // remove @
-            let after = &val[cursor + filter_text.get().len()..];
-            let new_val = format!("{}{}{}", before, snippet, after);
-            set_content.set(new_val);
-            set_is_dirty.set(true);
+            let val = content.get_untracked();
+            if at_pos > 0 && at_pos <= val.len() {
+                let before = &val[..at_pos - 1];
+                let after = &val[at_pos..];
+                let new_val = format!("{}{}{}", before, snippet, after);
+                undo_stack.update(|s| s.push(val.clone()));
+                redo_stack.update(|s| s.clear());
+                editor_state.sync_from_content(&new_val);
+                set_content.set(new_val);
+                set_is_dirty.set(true);
+            }
         }
         set_insert_menu.set(None);
     };
 
+    let on_contextmenu = move |ev: ev::MouseEvent| {
+        if ai_settings.get().has_active_connection() {
+            set_ctx_menu.set(None);
+        } else {
+            ev.prevent_default();
+        }
+    };
+
+    let on_block_change: Callback<(), ()> = Callback::new(move |_| {
+        let new_text = editor_state.to_string();
+        let old_text = content.get_untracked();
+        if old_text != new_text {
+            undo_stack.update(|s| s.push(old_text));
+            redo_stack.update(|s| s.clear());
+            set_content.set(new_text);
+            set_is_dirty.set(true);
+        }
+    });
+
+    let on_at_menu: Callback<(i32, i32, usize), ()> = Callback::new(move |(x, y, cursor)| {
+        set_insert_menu.set(Some((x, y, cursor)));
+        set_filter_text.set(String::new());
+    });
+
+    let on_keydown = move |ev: ev::KeyboardEvent| {
+        if insert_menu.get().is_some() && ev.key() == "Escape" {
+            set_insert_menu.set(None);
+            ev.prevent_default();
+            return;
+        }
+        if ev.ctrl_key() || ev.meta_key() {
+            if ev.key() == "z" {
+                ev.prevent_default();
+                undo_stack.update(|s| {
+                    if let Some(prev) = s.pop() {
+                        redo_stack.update(|r| r.push(content.get_untracked()));
+                        set_content.set(prev.clone());
+                        editor_state.sync_from_content(&prev);
+                        set_is_dirty.set(true);
+                    }
+                });
+            } else if ev.key() == "x" || ev.key() == "X" {
+                ev.prevent_default();
+                redo_stack.update(|r| {
+                    if let Some(next) = r.pop() {
+                        undo_stack.update(|s| s.push(content.get_untracked()));
+                        set_content.set(next.clone());
+                        editor_state.sync_from_content(&next);
+                        set_is_dirty.set(true);
+                    }
+                });
+            }
+        }
+    };
+
     view! {
-        <div class="editor-pane">
-            <textarea
-                class="editor-textarea"
-                placeholder="Start writing markdown..."
-                prop:value=move || content.get()
-                on:input=on_input
-                on:contextmenu=on_contextmenu
-                on:keydown=on_keydown
-                spellcheck="false"
-            ></textarea>
+        <div class="editor-wrapper" on:keydown=on_keydown>
+            <div class="editor-lines" on:contextmenu=on_contextmenu>
+                <For
+                    each=move || editor_state.blocks.get()
+                    key=|block| block.id
+                    children={move |block| {
+                        view! {
+                            <wysiwym::EditorBlockComponent
+                                state=editor_state
+                                block=block
+                                on_change=on_block_change
+                                on_at_menu=on_at_menu
+                            />
+                        }
+                    }}
+                />
+            </div>
             <InsertMenuPopup
                 insert_menu=insert_menu
                 set_insert_menu=set_insert_menu
@@ -1264,44 +1528,4 @@ fn Editor(
     }
 }
 
-// ── Insert menu popup ──
-
-#[component]
-fn InsertMenuPopup(
-    insert_menu: ReadSignal<Option<(i32, i32, usize)>>,
-    set_insert_menu: WriteSignal<Option<(i32, i32, usize)>>,
-    filter_text: ReadSignal<String>,
-    insert_item: impl Fn(&str) + 'static + Copy + Send + Sync,
-) -> impl IntoView {
-    view! {
-        <Show when=move || insert_menu.get().is_some()>
-            {move || {
-                let (x, y, _) = insert_menu.get().unwrap();
-                let ft = filter_text.get().to_lowercase();
-                let items: Vec<_> = INSERT_ITEMS.iter()
-                    .filter(|item| ft.is_empty() || item.label.to_lowercase().contains(&ft))
-                    .collect();
-                view! {
-                    <div class="insert-menu-backdrop" on:click=move |_| set_insert_menu.set(None)></div>
-                    <div class="insert-menu" style=format!("left:{}px;top:{}px", x, y)>
-                        {items.into_iter().map(|item| {
-                            let snippet = item.snippet.to_string();
-                            view! {
-                                <button class="insert-menu-item" on:mousedown=move |ev| {
-                                    ev.prevent_default();
-                                    insert_item(&snippet);
-                                }>
-                                    <div class="insert-menu-item-icon">{item.icon}</div>
-                                    <div class="insert-menu-item-text">
-                                        <div class="insert-menu-item-label">{item.label}</div>
-                                        <div class="insert-menu-item-desc">{item.desc}</div>
-                                    </div>
-                                </button>
-                            }
-                        }).collect::<Vec<_>>()}
-                    </div>
-                }
-            }}
-        </Show>
-    }
-}
+// File ends here.

@@ -10,8 +10,43 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
 	<link data-trunk rel="rust" data-wasm-opt="z" />
-	<link data-trunk rel="css" href="/public/css/tailwind.min.css" />
 	<link data-trunk rel="scss" href="/public/scss/main.scss" />
+	<script type="module">
+		import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+		let initialized = false;
+
+		async function ensureMermaid() {
+			if (!initialized) {
+				mermaid.initialize({
+					startOnLoad: false,
+					securityLevel: "loose",
+					theme: "neutral"
+				});
+				initialized = true;
+			}
+			return mermaid;
+		}
+
+		window.__writermd_render_mermaid = async (root) => {
+			if (!root) return;
+			const api = await ensureMermaid();
+			const blocks = root.querySelectorAll(".editor-mermaid-block");
+
+			for (const [index, block] of Array.from(blocks).entries()) {
+				const renderTarget = block.querySelector(".editor-mermaid-render");
+				const source = block.querySelector(".editor-mermaid-source")?.textContent?.trim();
+				if (!renderTarget || !source) continue;
+
+				try {
+					const { svg } = await api.render(`writermd-mermaid-${index}`, source);
+					renderTarget.innerHTML = svg;
+				} catch (error) {
+					renderTarget.innerHTML = `<pre class="editor-mermaid-error">${String(error)}</pre>`;
+				}
+			}
+		};
+	</script>
 </head>
 
 <body data-theme="dark"></body>

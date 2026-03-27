@@ -3,18 +3,19 @@
     windows_subsystem = "windows"
 )]
 
-use std::fs;
-use std::path::PathBuf;
-use tauri_plugin_dialog::DialogExt;
 use langchain_rust::{
     chain::{Chain, LLMChainBuilder},
-    fmt_message, fmt_template, message_formatter,
+    fmt_message, fmt_template,
     llm::openai::{OpenAI, OpenAIConfig},
+    message_formatter,
+    prompt::HumanMessagePromptTemplate,
     prompt_args,
     schemas::Message,
     template_fstring,
-    prompt::HumanMessagePromptTemplate,
 };
+use std::fs;
+use std::path::PathBuf;
+use tauri_plugin_dialog::DialogExt;
 
 // ── AI Settings (multi-server, TOML) ──
 
@@ -50,36 +51,49 @@ struct AiSettings {
 
 impl Default for AiSettings {
     fn default() -> Self {
-        Self { servers: vec![], active_index: None, last_model: None }
+        Self {
+            servers: vec![],
+            active_index: None,
+            last_model: None,
+        }
     }
 }
 
 /// A single chat message exchanged between user and assistant.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ChatMessage {
-    role: String,    // "user" or "assistant"
+    role: String, // "user" or "assistant"
     content: String,
 }
 
-/// Response from ai_chat — includes the AI's message and an optional document edit.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ChatResponse {
     message: String,
     /// If the AI wants to edit the document, this contains the new full content.
     document_edit: Option<String>,
+    /// Unified git diff of the document edit
+    diff: Option<String>,
 }
 
 fn settings_path() -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Could not determine config directory".to_string())?;
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Could not determine config directory".to_string())?;
     let app_dir = config_dir.join("WriterMD");
     fs::create_dir_all(&app_dir).map_err(|e| format!("Failed to create config dir: {}", e))?;
     Ok(app_dir.join("settings.toml"))
 }
 
-fn build_get_request(client: &reqwest::Client, url: &str, api_key: &str) -> reqwest::RequestBuilder {
+fn build_get_request(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+) -> reqwest::RequestBuilder {
     let req = client.get(url);
-    if api_key.is_empty() { req } else { req.header("Authorization", format!("Bearer {}", api_key)) }
+    if api_key.is_empty() {
+        req
+    } else {
+        req.header("Authorization", format!("Bearer {}", api_key))
+    }
 }
 
 fn build_openai(api_base: &str, api_key: &str, model: &str) -> OpenAI<OpenAIConfig> {
@@ -96,7 +110,8 @@ fn build_openai(api_base: &str, api_key: &str, model: &str) -> OpenAI<OpenAIConf
 async fn load_ai_settings() -> Result<AiSettings, String> {
     let path = settings_path()?;
     if path.exists() {
-        let data = fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {}", e))?;
+        let data =
+            fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {}", e))?;
         toml::from_str(&data).map_err(|e| format!("Failed to parse settings: {}", e))
     } else {
         Ok(AiSettings::default())
@@ -106,7 +121,8 @@ async fn load_ai_settings() -> Result<AiSettings, String> {
 #[tauri::command]
 async fn save_ai_settings(settings: AiSettings) -> Result<(), String> {
     let path = settings_path()?;
-    let data = toml::to_string_pretty(&settings).map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    let data = toml::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     fs::write(&path, data).map_err(|e| format!("Failed to write settings: {}", e))
 }
 
@@ -119,16 +135,25 @@ async fn verify_connection(api_base: String, api_key: String) -> Result<bool, St
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
     let resp = build_get_request(&client, &url, &api_key)
-        .send().await
+        .send()
+        .await
         .map_err(|e| {
-            if e.is_connect() { "Connection failed — check the URL and that the server is running".to_string() }
-            else if e.is_timeout() { "Connection timed out".to_string() }
-            else { format!("Request failed: {}", e) }
+            if e.is_connect() {
+                "Connection failed — check the URL and that the server is running".to_string()
+            } else if e.is_timeout() {
+                "Connection timed out".to_string()
+            } else {
+                format!("Request failed: {}", e)
+            }
         })?;
 
-    if resp.status().is_success() { Ok(true) }
-    else if resp.status().as_u16() == 401 { Err("Authentication failed — check your API key".to_string()) }
-    else { Err(format!("Server returned status {}", resp.status())) }
+    if resp.status().is_success() {
+        Ok(true)
+    } else if resp.status().as_u16() == 401 {
+        Err("Authentication failed — check your API key".to_string())
+    } else {
+        Err(format!("Server returned status {}", resp.status()))
+    }
 }
 
 #[tauri::command]
@@ -136,19 +161,26 @@ async fn list_models(api_base: String, api_key: String) -> Result<Vec<String>, S
     let url = format!("{}/models", api_base.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let resp = build_get_request(&client, &url, &api_key)
-        .send().await
+        .send()
+        .await
         .map_err(|e| format!("Failed to fetch models: {}", e))?;
 
     if !resp.status().is_success() {
         return Err(format!("API returned status {}", resp.status()));
     }
 
-    let body: serde_json::Value = resp.json().await
+    let body: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| format!("Failed to parse models response: {}", e))?;
 
     let mut models: Vec<String> = body["data"]
         .as_array()
-        .map(|arr| arr.iter().filter_map(|m| m["id"].as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     models.sort();
@@ -171,7 +203,14 @@ async fn ai_chat(
 
     // Build conversation history as context
     let mut history = String::new();
-    let recent: Vec<&ChatMessage> = messages.iter().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
+    let recent: Vec<&ChatMessage> = messages
+        .iter()
+        .rev()
+        .take(10)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     for msg in &recent[..recent.len().saturating_sub(1)] {
         history.push_str(&format!("[{}]: {}\n", msg.role, msg.content));
     }
@@ -198,8 +237,16 @@ async fn ai_chat(
          INSTRUCTIONS:\n\
          - Respond conversationally to help the user with their document.\n\
          {}",
-        if document_content.is_empty() { "(empty document)" } else { &document_content },
-        if history.is_empty() { "(new conversation)" } else { &history },
+        if document_content.is_empty() {
+            "(empty document)"
+        } else {
+            &document_content
+        },
+        if history.is_empty() {
+            "(new conversation)"
+        } else {
+            &history
+        },
         edit_instructions
     );
 
@@ -223,8 +270,22 @@ async fn ai_chat(
 
     // Parse for document edits
     let (message, document_edit) = parse_document_edit(&result);
+    let mut diff = None;
 
-    Ok(ChatResponse { message, document_edit })
+    if let Some(ref new_content) = document_edit {
+        diff = Some(
+            similar::TextDiff::from_lines(&document_content, new_content)
+                .unified_diff()
+                .context_radius(3)
+                .to_string(),
+        );
+    }
+
+    Ok(ChatResponse {
+        message,
+        document_edit,
+        diff,
+    })
 }
 
 /// Parse AI response for <DOCUMENT_EDIT> tags.
@@ -291,8 +352,6 @@ async fn ai_amend(
     Ok(result)
 }
 
-// ── File operations ──
-
 #[derive(Clone, serde::Serialize)]
 struct OpenFileResponse {
     path: String,
@@ -301,15 +360,22 @@ struct OpenFileResponse {
 
 #[tauri::command]
 async fn open_file(app: tauri::AppHandle) -> Result<Option<OpenFileResponse>, String> {
-    let file_path = app.dialog().file()
+    let file_path = app
+        .dialog()
+        .file()
         .add_filter("Markdown", &["md", "markdown", "txt"])
         .blocking_pick_file();
     match file_path {
         Some(fp) => {
             let path_buf = fp.into_path().map_err(|e| format!("Invalid path: {}", e))?;
             let path_str = path_buf.to_string_lossy().to_string();
-            let content = fs::read_to_string(&path_buf).map_err(|e| format!("Failed to read: {}", e))?;
-            Ok(Some(OpenFileResponse { path: path_str, content }))
+            let content =
+                fs::read_to_string(&path_buf).map_err(|e| format!("Failed to read: {}", e))?;
+
+            Ok(Some(OpenFileResponse {
+                path: path_str,
+                content,
+            }))
         }
         None => Ok(None),
     }
@@ -317,12 +383,15 @@ async fn open_file(app: tauri::AppHandle) -> Result<Option<OpenFileResponse>, St
 
 #[tauri::command]
 async fn save_file(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, &content).map_err(|e| format!("Failed to save: {}", e))
+    fs::write(&path, &content).map_err(|e| format!("Failed to save: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]
 async fn save_file_as(app: tauri::AppHandle, content: String) -> Result<Option<String>, String> {
-    let file_path = app.dialog().file()
+    let file_path = app
+        .dialog()
+        .file()
         .add_filter("Markdown", &["md", "markdown", "txt"])
         .blocking_save_file();
     match file_path {
@@ -330,6 +399,7 @@ async fn save_file_as(app: tauri::AppHandle, content: String) -> Result<Option<S
             let path_buf = fp.into_path().map_err(|e| format!("Invalid path: {}", e))?;
             let path_str = path_buf.to_string_lossy().to_string();
             fs::write(&path_buf, &content).map_err(|e| format!("Failed to save: {}", e))?;
+
             Ok(Some(path_str))
         }
         None => Ok(None),

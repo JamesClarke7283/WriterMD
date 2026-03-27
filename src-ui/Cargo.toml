@@ -20,8 +20,12 @@ tauri-wasm = { git = "https://github.com/p1mo/tauri-wasm", features = [
 ] }
 
 futures = "0.3"
-web-sys = { version = "0.3", features = ["Document", "DomRect", "Element", "HtmlElement", "HtmlTextAreaElement", "Window"] }
+web-sys = { version = "0.3", features = ["Document", "DomRect", "Element", "HtmlElement", "HtmlTextAreaElement", "Window", "Selection", "Range", "Node", "NodeList"] }
+js-sys = "0.3"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+regex = "1.12.3"
+pulldown-cmark = "0.13.3"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
