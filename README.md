@@ -49,6 +49,24 @@ cargo tauri dev
 cargo tauri build
 ```
 
+## Releasing
+
+- Bump the release version in [`src-tauri/Cargo.toml`](src-tauri/Cargo.toml).
+- If the source icon changes, regenerate the Tauri icon set with:
+
+```bash
+PATH="$HOME/.cargo/bin:$PATH" cargo tauri icon src-tauri/icons/app-icon.png --output src-tauri/icons
+```
+
+- Push a matching git tag in the form `vX.Y.Z`.
+- GitHub Actions publishes these release artifacts:
+- Linux `x86_64`: AppImage, `.deb`, `.rpm`
+- Linux `arm64`: AppImage, `.deb`, `.rpm`
+- macOS `x86_64`: `.dmg`
+- macOS `arm64`: `.dmg`
+- Windows `x86_64`: `.msi`
+- Windows `arm64`: `.msi`
+
 ### Arch Linux AppImage workaround
 
 Tauri's cached AppImage helpers currently need two Arch-specific workarounds in this repo:
