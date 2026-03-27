@@ -30,18 +30,7 @@ jobs:
           set -euo pipefail
 
           version="$(
-            cargo metadata --no-deps --format-version 1 | python -c '
-import json
-import sys
-
-data = json.load(sys.stdin)
-for package in data["packages"]:
-    if package["name"] == "src_tauri":
-        print(package["version"])
-        break
-else:
-    raise SystemExit("src_tauri package not found")
-'
+            cargo metadata --no-deps --format-version 1 | python -c "import json, sys; print(next(package['version'] for package in json.load(sys.stdin)['packages'] if package['name'] == 'src_tauri'))"
           )"
 
           tag="${GITHUB_REF_NAME}"
