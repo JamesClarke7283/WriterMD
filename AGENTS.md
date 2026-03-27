@@ -17,3 +17,5 @@
 - Document editing should be plain markdown-first; Git integration is optional and belongs to directory-level workflows rather than automatic file open/save behavior.
 - Editor ergonomics direction: keyboard-first editing should work across the whole document, including save shortcuts and block-to-block navigation in the live markdown editor.
 - AI UX direction: use a docked chat sidebar with explicit Chat and Edit modes instead of a hidden drawer-style panel.
+- Arch Linux packaging note: Tauri AppImage bundling may require an upstream `linuxdeploy-plugin-appimage` binary on `PATH` even when the `linuxdeploy-appimage` package is installed; prefer placing it in `~/.local/bin`.
+- Arch Linux packaging note: keep an in-repo helper to patch Tauri's cached AppImage tooling for `NO_STRIP` builds and the GTK `gdk-pixbuf` path mismatch.

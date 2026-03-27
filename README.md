@@ -49,6 +49,25 @@ cargo tauri dev
 cargo tauri build
 ```
 
+### Arch Linux AppImage workaround
+
+Tauri's cached AppImage helpers currently need two Arch-specific workarounds in this repo:
+
+- disable stripping because older bundled tooling fails on `.relr.dyn` ELF sections
+- patch the cached GTK helper to tolerate Arch's missing `gdk-pixbuf-2.0/2.10.0` directory
+
+Prepare the cache once after Tauri has downloaded its AppImage helpers:
+
+```bash
+./scripts/setup-appimage-arch.sh
+```
+
+Then build the AppImage with:
+
+```bash
+NO_COLOR=false RUST_BACKTRACE=1 LDAI_VERBOSE=1 NO_STRIP=1 cargo tauri bundle -v -b appimage
+```
+
 ## License
 
 See [LICENSE](LICENSE).
