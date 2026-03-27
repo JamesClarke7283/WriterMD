@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="$(rg '^version = \"' src-tauri/Cargo.toml | head -n 1 | cut -d '\"' -f 2)"
+          version="$(grep -m 1 '^version = "' src-tauri/Cargo.toml | cut -d '"' -f 2)"
 
           if [[ -z "${version}" ]]; then
             echo "Could not read version from src-tauri/Cargo.toml" >&2
