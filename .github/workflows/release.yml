@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -29,16 +30,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="$(
-            cargo metadata --no-deps --format-version 1 | python -c "import json, sys; print(next(package['version'] for package in json.load(sys.stdin)['packages'] if package['name'] == 'src_tauri'))"
-          )"
+          version="$(sed -n 's/^version = \"\\([^\"]*\\)\"$/\\1/p' src-tauri/Cargo.toml | head -n 1)"
 
-          tag="${GITHUB_REF_NAME}"
+          if [[ -z "${version}" ]]; then
+            echo "Could not read version from src-tauri/Cargo.toml" >&2
+            exit 1
+          fi
+
           expected_tag="v${version}"
 
-          if [[ "${tag}" != "${expected_tag}" ]]; then
-            echo "Tag ${tag} does not match src-tauri version ${version}" >&2
-            exit 1
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            if [[ "${tag}" != "${expected_tag}" ]]; then
+              echo "Tag ${tag} does not match src-tauri version ${version}" >&2
+              exit 1
+            fi
+          else
+            tag="${expected_tag}"
           fi
 
           if [[ "${version}" == *-* ]]; then
