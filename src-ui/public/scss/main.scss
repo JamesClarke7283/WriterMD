@@ -110,10 +110,16 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 
   // Orange dot for dirty indicator
-  .dirty & {
+  &.dirty::before {
+    content: "•";
     color: var(--text-accent);
+    font-size: 14px;
+    line-height: 1;
   }
 }
 
@@ -429,6 +435,733 @@ html, body {
   font-size: 12px;
 }
 
+// ── Main area (editor + AI panel side-by-side) ──
+.main-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+// ── Settings Dialog ──
+.dialog-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-backdrop);
+  z-index: 200;
+  animation: fadeIn 0.15s ease;
+}
+
+.dialog-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: 90vw;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px var(--shadow);
+  z-index: 210;
+  padding: 28px;
+  animation: dialogIn 0.2s ease;
+  transition: background-color 0.25s ease;
+}
+
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+}
+
+.dialog-field {
+  margin-bottom: 16px;
+}
+
+.dialog-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dialog-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, background-color 0.25s ease;
+
+  &:focus {
+    border-color: var(--text-accent);
+  }
+
+  &::placeholder {
+    color: var(--text-placeholder);
+  }
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.dialog-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.dialog-btn-secondary {
+  background: var(--btn-hover);
+  color: var(--text-primary);
+
+  &:hover:not(:disabled) {
+    background: var(--bg-menu-hover);
+  }
+}
+
+.dialog-btn-primary {
+  background: var(--text-accent);
+  color: #ffffff;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+}
+
+// ── Chat Panel (replaces old AI Panel) ──
+.chat-panel {
+  width: 380px;
+  min-width: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-titlebar);
+  border-left: 1px solid var(--border-color);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateX(100%);
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 100;
+  
+  &.open {
+    transform: translateX(0);
+    box-shadow: -4px 0 16px var(--shadow);
+  }
+}
+
+.chat-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-menu);
+}
+
+.chat-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.edit-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  &.active {
+    background: rgba(212, 146, 75, 0.15);
+    border-color: var(--text-accent);
+    color: var(--text-accent);
+  }
+
+  &:hover {
+    background: var(--btn-hover);
+    color: var(--text-primary);
+  }
+}
+
+.chat-header-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: var(--btn-hover);
+    color: var(--text-primary);
+  }
+}
+
+.chat-history {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--separator);
+    border-radius: 3px;
+  }
+}
+
+.chat-bubble {
+  max-width: 90%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  animation: slideInRight 0.2s ease;
+
+  &.user {
+    align-self: flex-end;
+    background: var(--text-accent);
+    color: #fff;
+    border-bottom-right-radius: 2px;
+  }
+
+  &.assistant {
+    align-self: flex-start;
+    background: var(--bg-editor);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-bottom-left-radius: 2px;
+  }
+}
+
+.chat-input-area {
+  padding: 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-menu);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-input {
+  width: 100%;
+  min-height: 60px;
+  max-height: 150px;
+  resize: vertical;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease;
+
+  &:focus {
+    border-color: var(--text-accent);
+  }
+}
+
+.chat-input-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.send-btn {
+  background: var(--text-accent);
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 8px 16px;
+  font-style: italic;
+
+  .typing-dots {
+    display: flex;
+    gap: 4px;
+    
+    span {
+      width: 4px;
+      height: 4px;
+      background: var(--text-secondary);
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out both;
+
+      &:nth-child(1) { animation-delay: -0.32s; }
+      &:nth-child(2) { animation-delay: -0.16s; }
+    }
+  }
+}
+
+// ── Amend Dialog ──
+.amend-dialog {
+  width: 500px;
+  max-width: 90vw;
+}
+
+.amend-preview {
+  margin-bottom: 20px;
+}
+
+.amend-selected-text {
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  border-radius: 6px;
+  font-family: 'Inter', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.amend-instruction {
+  width: 100%;
+  height: 80px;
+  resize: none;
+}
+
+// ── Server Type Selector ──
+.server-type-selector {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.server-type-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+
+  input[type="radio"] {
+    accent-color: var(--text-accent);
+    cursor: pointer;
+  }
+}
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+// ── Model Selector Dropdown ──
+.model-selector {
+  margin-bottom: 8px;
+}
+
+.model-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.model-dropdown-wrap {
+  position: relative;
+}
+
+.model-dropdown-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'Inter', monospace;
+  outline: none;
+  transition: border-color 0.15s ease;
+
+  &:focus {
+    border-color: var(--text-accent);
+  }
+
+  &::placeholder {
+    color: var(--text-placeholder);
+  }
+}
+
+.model-dropdown-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 50;
+}
+
+.model-dropdown-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 6px 16px var(--shadow);
+  z-index: 60;
+  animation: fadeIn 0.1s ease;
+}
+
+.model-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'Inter', monospace;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+
+  &:hover {
+    background: var(--bg-menu-hover);
+  }
+
+  &.selected {
+    background: var(--btn-hover);
+    color: var(--text-accent);
+    font-weight: 500;
+  }
+}
+
+.model-dropdown-empty {
+  padding: 10px;
+  text-align: center;
+  color: var(--text-placeholder);
+  font-size: 11px;
+}
+
+// ── Right-click Context Menu ──
+.ctx-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 300;
+}
+
+.ctx-menu {
+  position: fixed;
+  min-width: 200px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
+  z-index: 310;
+  padding: 4px 0;
+  animation: insertMenuIn 0.12s ease;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 16px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background-color 0.1s ease;
+
+  &:hover {
+    background: var(--bg-menu-hover);
+  }
+}
+
+.ctx-icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.ctx-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ctx-custom {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+}
+
+.ctx-custom-input {
+  flex: 1;
+  padding: 7px 10px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+
+  &:focus {
+    border-color: var(--text-accent);
+  }
+
+  &::placeholder {
+    color: var(--text-placeholder);
+  }
+}
+
+.ctx-submit {
+  padding: 7px 12px;
+  background: var(--text-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+
+  &:hover { opacity: 0.9; }
+}
+
+// ── Multi-server Settings ──
+.dialog-wide {
+  width: 480px;
+}
+
+.server-list {
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.server-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-placeholder);
+  font-size: 12px;
+}
+
+.server-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--separator);
+  transition: background-color 0.1s ease;
+
+  &:last-child { border-bottom: none; }
+  &.active { background: var(--btn-hover); }
+}
+
+.server-radio {
+  background: none;
+  border: none;
+  color: var(--text-accent);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.server-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.server-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.server-model {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.server-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.server-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: background-color 0.1s ease;
+
+  &:hover { background: var(--btn-hover); }
+}
+
+.dialog-btn-verify {
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    border-color: var(--text-accent);
+    background: var(--btn-hover);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.verify-success {
+  padding: 6px 10px;
+  margin-top: 6px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.verify-error {
+  padding: 6px 10px;
+  margin-top: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: center;
+  word-break: break-word;
+}
+
+.dialog-btn-add {
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: 1px dashed var(--separator);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 12px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    border-color: var(--text-accent);
+    color: var(--text-accent);
+  }
+}
+
+.server-edit-form {
+  padding: 16px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--separator);
+}
+
 // ── Animations ──
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -455,4 +1188,30 @@ html, body {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

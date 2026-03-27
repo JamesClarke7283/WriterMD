@@ -26,7 +26,105 @@ struct OpenFileResponse {
     content: String,
 }
 
-// ── Helper: extract filename from path ──
+// ── AI types ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum ServerType {
+    Openai,
+    Ollama,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct AiServer {
+    server_type: ServerType,
+    name: String,
+    api_base: String,
+    api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct AiSettings {
+    servers: Vec<AiServer>,
+    active_index: Option<usize>,
+    last_model: Option<String>,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self { servers: vec![], active_index: None, last_model: None }
+    }
+}
+
+impl AiSettings {
+    fn active_server(&self) -> Option<&AiServer> {
+        self.active_index.and_then(|i| self.servers.get(i))
+    }
+
+    fn has_active_connection(&self) -> bool {
+        self.active_server().is_some()
+    }
+}
+
+// Chat message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+// Chat response from backend
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatResponse {
+    message: String,
+    document_edit: Option<String>,
+}
+
+// ── Tauri command args (camelCase for Tauri v2) ──
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveAiSettingsArgs {
+    settings: AiSettings,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatArgs {
+    messages: Vec<ChatMessage>,
+    document_content: String,
+    edit_mode: bool,
+    api_base: String,
+    api_key: String,
+    model: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiAmendArgs {
+    selected_text: String,
+    instruction: String,
+    api_base: String,
+    api_key: String,
+    model: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListModelsArgs {
+    api_base: String,
+    api_key: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyConnectionArgs {
+    api_base: String,
+    api_key: String,
+}
+
+// ── Helper ──
 
 fn filename_from_path(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
@@ -34,204 +132,92 @@ fn filename_from_path(path: &str) -> String {
 
 // ── Markdown insert items ──
 
-/// A markdown syntax item for the @ insert menu.
-#[derive(Clone, PartialEq)]
 struct InsertItem {
-    /// Icon/emoji displayed in the menu
-    icon: &'static str,
-    /// Label shown to the user
     label: &'static str,
-    /// Description/hint text
-    description: &'static str,
-    /// The markdown text to insert (replaces `@query`)
-    insert_text: &'static str,
-    /// Where to place cursor relative to start of inserted text. None = end.
-    cursor_offset: Option<usize>,
+    icon: &'static str,
+    desc: &'static str,
+    snippet: &'static str,
 }
 
-/// All available markdown syntax items for the @ menu.
-fn get_insert_items() -> Vec<InsertItem> {
-    vec![
-        // ── Headings ──
-        InsertItem {
-            icon: "H1",
-            label: "Heading 1",
-            description: "Top-level heading",
-            insert_text: "# ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "H2",
-            label: "Heading 2",
-            description: "Section heading",
-            insert_text: "## ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "H3",
-            label: "Heading 3",
-            description: "Sub-section heading",
-            insert_text: "### ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "H4",
-            label: "Heading 4",
-            description: "Sub-sub-section heading",
-            insert_text: "#### ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "H5",
-            label: "Heading 5",
-            description: "Minor heading",
-            insert_text: "##### ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "H6",
-            label: "Heading 6",
-            description: "Smallest heading",
-            insert_text: "###### ",
-            cursor_offset: None,
-        },
-        // ── Lists ──
-        InsertItem {
-            icon: "•",
-            label: "Bullet List",
-            description: "Unordered list item",
-            insert_text: "- ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "1.",
-            label: "Numbered List",
-            description: "Ordered list item",
-            insert_text: "1. ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "☐",
-            label: "Task List",
-            description: "Checkbox item",
-            insert_text: "- [ ] ",
-            cursor_offset: None,
-        },
-        // ── Block elements ──
-        InsertItem {
-            icon: "❝",
-            label: "Blockquote",
-            description: "Quoted text block",
-            insert_text: "> ",
-            cursor_offset: None,
-        },
-        InsertItem {
-            icon: "⟨⟩",
-            label: "Code Block",
-            description: "Fenced code block",
-            insert_text: "```\n\n```",
-            cursor_offset: Some(4), // after first ``` and newline
-        },
-        InsertItem {
-            icon: "──",
-            label: "Horizontal Rule",
-            description: "Divider line",
-            insert_text: "---\n",
-            cursor_offset: None,
-        },
-        // ── Inline formatting ──
-        InsertItem {
-            icon: "B",
-            label: "Bold",
-            description: "Strong emphasis",
-            insert_text: "**text**",
-            cursor_offset: Some(2), // select "text" between **
-        },
-        InsertItem {
-            icon: "I",
-            label: "Italic",
-            description: "Emphasis",
-            insert_text: "*text*",
-            cursor_offset: Some(1),
-        },
-        InsertItem {
-            icon: "S",
-            label: "Strikethrough",
-            description: "Crossed out text",
-            insert_text: "~~text~~",
-            cursor_offset: Some(2),
-        },
-        InsertItem {
-            icon: "`",
-            label: "Inline Code",
-            description: "Code span",
-            insert_text: "`code`",
-            cursor_offset: Some(1),
-        },
-        // ── Links & media ──
-        InsertItem {
-            icon: "🔗",
-            label: "Link",
-            description: "Hyperlink",
-            insert_text: "[text](url)",
-            cursor_offset: Some(1), // inside []
-        },
-        InsertItem {
-            icon: "🖼",
-            label: "Image",
-            description: "Image embed",
-            insert_text: "![alt](url)",
-            cursor_offset: Some(2), // inside []
-        },
-        // ── Table ──
-        InsertItem {
-            icon: "⊞",
-            label: "Table",
-            description: "Markdown table",
-            insert_text: "| Column 1 | Column 2 | Column 3 |\n| -------- | -------- | -------- |\n| Cell     | Cell     | Cell     |\n",
-            cursor_offset: None,
-        },
-    ]
-}
+const INSERT_ITEMS: &[InsertItem] = &[
+    InsertItem { label: "Heading 1", icon: "H1", desc: "Large heading", snippet: "# " },
+    InsertItem { label: "Heading 2", icon: "H2", desc: "Medium heading", snippet: "## " },
+    InsertItem { label: "Heading 3", icon: "H3", desc: "Small heading", snippet: "### " },
+    InsertItem { label: "Bold", icon: "B", desc: "Strong text", snippet: "**bold**" },
+    InsertItem { label: "Italic", icon: "I", desc: "Emphasized text", snippet: "*italic*" },
+    InsertItem { label: "Link", icon: "L", desc: "Hyperlink", snippet: "[text](url)" },
+    InsertItem { label: "Image", icon: "Img", desc: "Embedded image", snippet: "![alt](url)" },
+    InsertItem { label: "Code Block", icon: "</>", desc: "Multiline code", snippet: "```\ncode\n```" },
+    InsertItem { label: "Inline Code", icon: "`", desc: "Inline code snippet", snippet: "`code`" },
+    InsertItem { label: "Blockquote", icon: "\"", desc: "Quoted text", snippet: "> " },
+    InsertItem { label: "Bullet List", icon: "•", desc: "Unordered list", snippet: "- item\n- item\n- item" },
+    InsertItem { label: "Numbered List", icon: "1.", desc: "Ordered list", snippet: "1. item\n2. item\n3. item" },
+    InsertItem { label: "Table", icon: "Tbl", desc: "Markdown table", snippet: "| Col 1 | Col 2 |\n|-------|-------|\n| A     | B     |" },
+    InsertItem { label: "HR", icon: "---", desc: "Horizontal rule", snippet: "---" },
+    InsertItem { label: "Task List", icon: "☑", desc: "Checkboxes", snippet: "- [ ] task\n- [x] done" },
+];
 
-// ── App (root component) ──
+// ── App component ──
 
-/// Root component for WriterMD. Manages theme, file state, and layout.
 #[component]
 pub fn App() -> impl IntoView {
-    // Theme: true = dark, false = light
-    let (is_dark, set_is_dark) = signal(true);
-    // Editor content
+    // Core state
     let (content, set_content) = signal(String::new());
-    // Current file path (None = untitled)
     let (file_path, set_file_path) = signal::<Option<String>>(None);
-    // Dirty flag (unsaved changes)
     let (is_dirty, set_is_dirty) = signal(false);
-    // Menu open state
+    let (is_dark, set_is_dark) = signal(true);
     let (menu_open, set_menu_open) = signal(false);
+    let (settings_open, set_settings_open) = signal(false);
+    let (chat_panel_open, set_chat_panel_open) = signal(false);
 
-    // Character count derived from content
-    let char_count = Memo::new(move |_| content.get().len());
+    // Counter mode: 0=chars, 1=words, 2=paragraphs
+    let (counter_mode, set_counter_mode) = signal(0u8);
 
-    // Display name for title bar
+    // Edit mode toggle for chat panel
+    let (edit_mode, set_edit_mode) = signal(true);
+
+    // AI settings
+    let (ai_settings, set_ai_settings) = signal(AiSettings::default());
+
+    // Model selection — shared between chat panel and amend
+    let (selected_model, set_selected_model) = signal(String::new());
+
+    // Right-click context menu state
+    let (ctx_menu, set_ctx_menu) = signal::<Option<ContextMenuState>>(None);
+
+    // Amend dialog state
+    let (amend_state, set_amend_state) = signal::<Option<AmendState>>(None);
+
+    // Chat history
+    let (chat_messages, set_chat_messages) = signal::<Vec<ChatMessage>>(vec![]);
+
+    // Load settings on mount
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            let result: Result<AiSettings, _> = invoke("load_ai_settings", &EmptyArgs {}).await;
+            if let Ok(settings) = result {
+                // Restore last model
+                if let Some(ref last) = settings.last_model {
+                    set_selected_model.set(last.clone());
+                }
+                set_ai_settings.set(settings);
+            }
+        });
+    });
+
+
     let display_name = Memo::new(move |_| {
         let name = match file_path.get() {
             Some(p) => filename_from_path(&p),
             None => "Untitled-1".to_string(),
         };
-        if is_dirty.get() {
-            format!("● {}", name)
-        } else {
-            name
-        }
+        if is_dirty.get() { format!("● {}", name) } else { name }
     });
 
-    // ── File operations ──
-
+    // File operations
     let do_open = move || {
         leptos::task::spawn_local(async move {
-            let result: Option<OpenFileResponse> =
-                invoke("open_file", &EmptyArgs {}).await.unwrap();
+            let result: Option<OpenFileResponse> = invoke("open_file", &EmptyArgs {}).await.unwrap();
             if let Some(resp) = result {
                 set_content.set(resp.content);
                 set_file_path.set(Some(resp.path));
@@ -243,10 +229,7 @@ pub fn App() -> impl IntoView {
     let do_save_as = move || {
         let text = content.get();
         leptos::task::spawn_local(async move {
-            let result: Option<String> =
-                invoke("save_file_as", &SaveFileAsArgs { content: text })
-                    .await
-                    .unwrap();
+            let result: Option<String> = invoke("save_file_as", &SaveFileAsArgs { content: text }).await.unwrap();
             if let Some(new_path) = result {
                 set_file_path.set(Some(new_path));
                 set_is_dirty.set(false);
@@ -260,60 +243,47 @@ pub fn App() -> impl IntoView {
         match path {
             Some(p) => {
                 leptos::task::spawn_local(async move {
-                    let _: () = invoke(
-                        "save_file",
-                        &SaveFileArgs {
-                            path: p,
-                            content: text,
-                        },
-                    )
-                    .await
-                    .unwrap();
+                    let _: () = invoke("save_file", &SaveFileArgs { path: p, content: text }).await.unwrap();
                     set_is_dirty.set(false);
                 });
             }
-            None => {
-                do_save_as();
-            }
+            None => { do_save_as(); }
         }
     };
 
-    // ── Window controls (via Tauri commands for v2 compatibility) ──
-
+    // Window controls
     let do_minimize = move || {
         leptos::task::spawn_local(async move {
             let _: Result<(), _> = invoke("window_minimize", &EmptyArgs {}).await;
         });
     };
-
     let do_maximize = move || {
         leptos::task::spawn_local(async move {
             let _: Result<(), _> = invoke("window_toggle_maximize", &EmptyArgs {}).await;
         });
     };
-
     let do_close = move || {
         leptos::task::spawn_local(async move {
             let _: Result<(), _> = invoke("window_close", &EmptyArgs {}).await;
         });
     };
 
-    // Theme class on body
+    // Theme
     Effect::new(move |_| {
         let doc = web_sys::window().unwrap().document().unwrap();
         let body = doc.body().unwrap();
-        if is_dark.get() {
-            body.set_attribute("data-theme", "dark").unwrap();
-        } else {
-            body.set_attribute("data-theme", "light").unwrap();
-        }
+        let theme = if is_dark.get() { "dark" } else { "light" };
+        body.set_attribute("data-theme", theme).unwrap();
     });
 
     view! {
         <div class="app-container">
             <TitleBar
                 display_name=display_name
-                char_count=char_count
+                content=content
+                is_dirty=is_dirty
+                counter_mode=counter_mode
+                set_counter_mode=set_counter_mode
                 menu_open=menu_open
                 set_menu_open=set_menu_open
                 on_minimize=do_minimize
@@ -328,64 +298,132 @@ pub fn App() -> impl IntoView {
                 on_open=do_open
                 on_save=do_save
                 on_save_as=do_save_as
+                set_settings_open=set_settings_open
+                set_chat_panel_open=set_chat_panel_open
             />
-            <Editor
+            <div class="main-area">
+                <Editor
+                    content=content
+                    set_content=set_content
+                    set_is_dirty=set_is_dirty
+                    ai_settings=ai_settings
+                    _ctx_menu=ctx_menu
+                    set_ctx_menu=set_ctx_menu
+                />
+                <ChatPanel
+                    is_open=chat_panel_open
+                    set_is_open=set_chat_panel_open
+                    content=content
+                    set_content=set_content
+                    set_is_dirty=set_is_dirty
+                    ai_settings=ai_settings
+                    set_ai_settings=set_ai_settings
+                    selected_model=selected_model
+                    set_selected_model=set_selected_model
+                    chat_messages=chat_messages
+                    set_chat_messages=set_chat_messages
+                    edit_mode=edit_mode
+                    set_edit_mode=set_edit_mode
+                />
+            </div>
+            <SettingsDialog
+                is_open=settings_open
+                set_is_open=set_settings_open
+                ai_settings=ai_settings
+                set_ai_settings=set_ai_settings
+            />
+            <ContextMenu
+                ctx_menu=ctx_menu
+                set_ctx_menu=set_ctx_menu
+                set_amend_state=set_amend_state
+                ai_settings=ai_settings
+            />
+            <AmendDialog
+                amend_state=amend_state
+                set_amend_state=set_amend_state
                 content=content
                 set_content=set_content
                 set_is_dirty=set_is_dirty
+                ai_settings=ai_settings
+                selected_model=selected_model
             />
         </div>
     }
 }
 
+// ── Right-click context menu state ──
+
+#[derive(Clone, PartialEq)]
+struct ContextMenuState {
+    x: i32,
+    y: i32,
+    sel_start: usize,
+    sel_end: usize,
+}
+
+// ── Amend dialog state ──
+
+#[derive(Clone, PartialEq)]
+struct AmendState {
+    sel_start: usize,
+    sel_end: usize,
+    selected_text: String,
+}
+
 // ── TitleBar ──
 
-/// Custom title bar matching the screenshot design.
 #[component]
 fn TitleBar(
     display_name: Memo<String>,
-    char_count: Memo<usize>,
+    content: ReadSignal<String>,
+    is_dirty: ReadSignal<bool>,
+    counter_mode: ReadSignal<u8>,
+    set_counter_mode: WriteSignal<u8>,
     menu_open: ReadSignal<bool>,
     set_menu_open: WriteSignal<bool>,
     on_minimize: impl Fn() + 'static + Copy + Send + Sync,
     on_maximize: impl Fn() + 'static + Copy + Send + Sync,
     on_close: impl Fn() + 'static + Copy + Send + Sync,
 ) -> impl IntoView {
+    let counter_display = Memo::new(move |_| {
+        let text = content.get();
+        match counter_mode.get() {
+            0 => format!("C {}", text.len()),
+            1 => {
+                let words = text.split_whitespace().count();
+                format!("W {}", words)
+            }
+            _ => {
+                let paras = text.split("\n\n").filter(|p| !p.trim().is_empty()).count();
+                format!("P {}", paras)
+            }
+        }
+    });
+
     view! {
         <div class="title-bar" data-tauri-drag-region="true">
             <div class="title-bar-left">
-                <button
-                    class="title-bar-btn hamburger-btn"
-                    on:click=move |_| set_menu_open.set(!menu_open.get())
-                    title="Menu"
+                <button class="title-bar-btn hamburger-btn" on:click=move |_| set_menu_open.set(!menu_open.get())>"☰"</button>
+                <button class="title-bar-btn char-count" on:click=move |_| set_counter_mode.set((counter_mode.get() + 1) % 3)
+                    title="Click to cycle: chars → words → paragraphs"
                 >
-                    "≡"
+                    {move || counter_display.get()}
                 </button>
-                <span class="char-count">
-                    "C " {move || char_count.get().to_string()}
-                </span>
             </div>
-            <div class="title-bar-center" data-tauri-drag-region="true">
-                <span class="file-name">{move || display_name.get()}</span>
+            <div class="title-bar-center">
+                <span class="file-name" class:dirty=move || is_dirty.get()>{move || display_name.get()}</span>
             </div>
             <div class="title-bar-right">
-                <button class="title-bar-btn window-btn" on:click=move |_| on_minimize() title="Minimize">
-                    "−"
-                </button>
-                <button class="title-bar-btn window-btn" on:click=move |_| on_maximize() title="Maximize">
-                    "□"
-                </button>
-                <button class="title-bar-btn window-btn close-btn" on:click=move |_| on_close() title="Close">
-                    "×"
-                </button>
+                <button class="title-bar-btn window-btn" on:click=move |_| on_minimize()>"─"</button>
+                <button class="title-bar-btn window-btn" on:click=move |_| on_maximize()>"□"</button>
+                <button class="title-bar-btn window-btn close-btn" on:click=move |_| on_close()>"✕"</button>
             </div>
         </div>
     }
 }
 
-// ── MenuOverlay ──
+// ── Menu Overlay ──
 
-/// Slide-out menu overlay with file operations and theme toggle.
 #[component]
 fn MenuOverlay(
     is_open: ReadSignal<bool>,
@@ -395,315 +433,875 @@ fn MenuOverlay(
     on_open: impl Fn() + 'static + Copy + Send + Sync,
     on_save: impl Fn() + 'static + Copy + Send + Sync,
     on_save_as: impl Fn() + 'static + Copy + Send + Sync,
+    set_settings_open: WriteSignal<bool>,
+    set_chat_panel_open: WriteSignal<bool>,
 ) -> impl IntoView {
-    let close_menu = move || set_is_open.set(false);
-
     view! {
         <Show when=move || is_open.get()>
-            <div class="menu-backdrop" on:click=move |_| close_menu()></div>
+            <div class="menu-backdrop" on:click=move |_| set_is_open.set(false)></div>
             <div class="menu-panel">
-                <button class="menu-item" on:click=move |_| {
-                    close_menu();
-                    on_open();
-                }>
-                    <span class="menu-icon">"📂"</span>
-                    <span>"Open"</span>
-                </button>
-                <button class="menu-item" on:click=move |_| {
-                    close_menu();
-                    on_save();
-                }>
-                    <span class="menu-icon">"💾"</span>
-                    <span>"Save"</span>
-                </button>
-                <button class="menu-item" on:click=move |_| {
-                    close_menu();
-                    on_save_as();
-                }>
-                    <span class="menu-icon">"📄"</span>
-                    <span>"Save As"</span>
-                </button>
+                <button class="menu-item" on:click=move |_| { on_open(); set_is_open.set(false); }>"📂 Open"</button>
+                <button class="menu-item" on:click=move |_| { on_save(); set_is_open.set(false); }>"💾 Save"</button>
+                <button class="menu-item" on:click=move |_| { on_save_as(); set_is_open.set(false); }>"📁 Save As"</button>
                 <div class="menu-separator"></div>
-                <button class="menu-item" on:click=move |_| {
-                    set_is_dark.set(!is_dark.get());
-                }>
-                    <span class="menu-icon">
-                        {move || if is_dark.get() { "☀️" } else { "🌙" }}
-                    </span>
-                    <span>
-                        {move || if is_dark.get() { "Light Theme" } else { "Dark Theme" }}
-                    </span>
+                <button class="menu-item" on:click=move |_| { set_chat_panel_open.update(|v| *v = !*v); set_is_open.set(false); }>"🤖 LLM Panel"</button>
+                <button class="menu-item" on:click=move |_| { set_settings_open.set(true); set_is_open.set(false); }>"⚙️ Settings"</button>
+                <div class="menu-separator"></div>
+                <button class="menu-item" on:click=move |_| set_is_dark.set(!is_dark.get())>
+                    {move || if is_dark.get() { "☀️ Light Theme" } else { "🌙 Dark Theme" }}
                 </button>
             </div>
         </Show>
     }
 }
 
-// ── Editor with @ Insert Menu ──
+// ── Settings Dialog ──
 
-/// Main editing area with @ trigger insert menu for markdown syntax.
+#[component]
+fn SettingsDialog(
+    is_open: ReadSignal<bool>,
+    set_is_open: WriteSignal<bool>,
+    ai_settings: ReadSignal<AiSettings>,
+    set_ai_settings: WriteSignal<AiSettings>,
+) -> impl IntoView {
+    let (local_servers, set_local_servers) = signal::<Vec<AiServer>>(vec![]);
+    let (local_active, set_local_active) = signal::<Option<usize>>(None);
+    let (editing_idx, set_editing_idx) = signal::<Option<usize>>(None);
+    let (edit_type, set_edit_type) = signal(ServerType::Openai);
+    let (edit_name, set_edit_name) = signal(String::new());
+    let (edit_base, set_edit_base) = signal(String::new());
+    let (edit_key, set_edit_key) = signal(String::new());
+    let (saving, set_saving) = signal(false);
+    let (verify_status, set_verify_status) = signal::<Option<Result<(), String>>>(None);
+    let (verifying, set_verifying) = signal(false);
+
+    // Sync when dialog opens
+    Effect::new(move |_| {
+        if is_open.get() {
+            let s = ai_settings.get();
+            set_local_servers.set(s.servers);
+            set_local_active.set(s.active_index);
+            set_editing_idx.set(None);
+        }
+    });
+
+    let start_add_openai = move || {
+        set_edit_type.set(ServerType::Openai);
+        set_edit_name.set(String::new());
+        set_edit_base.set("https://api.openai.com/v1".to_string());
+        set_edit_key.set(String::new());
+        set_verify_status.set(None);
+        set_editing_idx.set(Some(usize::MAX));
+    };
+
+    let start_add_ollama = move || {
+        set_edit_type.set(ServerType::Ollama);
+        set_edit_name.set(String::new());
+        set_edit_base.set("http://localhost:11434/v1".to_string());
+        set_edit_key.set(String::new());
+        set_verify_status.set(None);
+        set_editing_idx.set(Some(usize::MAX));
+    };
+
+    let start_edit = move |idx: usize| {
+        let servers = local_servers.get();
+        if let Some(s) = servers.get(idx) {
+            set_edit_type.set(s.server_type.clone());
+            set_edit_name.set(s.name.clone());
+            set_edit_base.set(s.api_base.clone());
+            set_edit_key.set(s.api_key.clone());
+            set_verify_status.set(None);
+            set_editing_idx.set(Some(idx));
+        }
+    };
+
+    let do_verify = move || {
+        let base = edit_base.get();
+        let key = edit_key.get();
+        set_verifying.set(true);
+        set_verify_status.set(None);
+        leptos::task::spawn_local(async move {
+            let result: Result<bool, _> = invoke(
+                "verify_connection",
+                &VerifyConnectionArgs { api_base: base, api_key: key },
+            ).await;
+            match result {
+                Ok(_) => set_verify_status.set(Some(Ok(()))),
+                Err(e) => set_verify_status.set(Some(Err(format!("{}", e)))),
+            }
+            set_verifying.set(false);
+        });
+    };
+
+    let save_edit = move || {
+        let server = AiServer {
+            server_type: edit_type.get(),
+            name: edit_name.get(),
+            api_base: edit_base.get(),
+            api_key: edit_key.get(),
+        };
+        let mut servers = local_servers.get();
+        match editing_idx.get() {
+            Some(idx) if idx == usize::MAX => {
+                servers.push(server);
+                if local_active.get().is_none() {
+                    set_local_active.set(Some(servers.len() - 1));
+                }
+            }
+            Some(idx) if idx < servers.len() => {
+                servers[idx] = server;
+            }
+            _ => {}
+        }
+        set_local_servers.set(servers);
+        set_editing_idx.set(None);
+    };
+
+    let delete_server = move |idx: usize| {
+        let mut servers = local_servers.get();
+        if idx < servers.len() {
+            servers.remove(idx);
+            let active = local_active.get();
+            if servers.is_empty() {
+                set_local_active.set(None);
+            } else if let Some(a) = active {
+                if a == idx { set_local_active.set(Some(0)); }
+                else if a > idx { set_local_active.set(Some(a - 1)); }
+            }
+            set_local_servers.set(servers);
+            if editing_idx.get() == Some(idx) { set_editing_idx.set(None); }
+        }
+    };
+
+    let do_save_all = move || {
+        let settings = AiSettings {
+            servers: local_servers.get(),
+            active_index: local_active.get(),
+            last_model: ai_settings.get().last_model,
+        };
+        set_saving.set(true);
+        let settings_c = settings.clone();
+        leptos::task::spawn_local(async move {
+            let _: Result<(), _> = invoke(
+                "save_ai_settings",
+                &SaveAiSettingsArgs { settings: settings_c.clone() },
+            ).await;
+            set_ai_settings.set(settings_c);
+            set_saving.set(false);
+            set_is_open.set(false);
+        });
+    };
+
+    view! {
+        <Show when=move || is_open.get()>
+            <div class="dialog-backdrop" on:click=move |_| set_is_open.set(false)></div>
+            <div class="dialog-panel dialog-wide">
+                <h2 class="dialog-title">"⚙️ AI Server Settings"</h2>
+
+                // Server list
+                <div class="server-list">
+                    {move || {
+                        let servers = local_servers.get();
+                        let active = local_active.get();
+                        if servers.is_empty() {
+                            vec![view! {
+                                <div class="server-empty">"No servers configured. Add one below."</div>
+                            }.into_any()]
+                        } else {
+                            servers.iter().enumerate().map(|(idx, server)| {
+                                let name = server.name.clone();
+                                let base = server.api_base.clone();
+                                let type_label = match server.server_type {
+                                    ServerType::Openai => "OpenAI",
+                                    ServerType::Ollama => "Ollama",
+                                };
+                                let is_active = active == Some(idx);
+                                view! {
+                                    <div class="server-item" class:active=is_active>
+                                        <button class="server-radio" on:click=move |_| set_local_active.set(Some(idx))>
+                                            {if is_active { "●" } else { "○" }}
+                                        </button>
+                                        <div class="server-info">
+                                            <span class="server-name">{name} <span class="server-type-badge">{type_label}</span></span>
+                                            <span class="server-model">{base}</span>
+                                        </div>
+                                        <div class="server-actions">
+                                            <button class="server-action-btn" on:click=move |_| start_edit(idx) title="Edit">"✏️"</button>
+                                            <button class="server-action-btn" on:click=move |_| delete_server(idx) title="Delete">"🗑️"</button>
+                                        </div>
+                                    </div>
+                                }.into_any()
+                            }).collect::<Vec<_>>()
+                        }
+                    }}
+                </div>
+
+                <div class="add-server-buttons">
+                    <button class="dialog-btn dialog-btn-add" on:click=move |_| start_add_openai()>"+ Add OpenAI Server"</button>
+                    <button class="dialog-btn dialog-btn-add" on:click=move |_| start_add_ollama()>"+ Add Ollama Server"</button>
+                </div>
+
+                // Edit form
+                <Show when=move || editing_idx.get().is_some()>
+                    <div class="server-edit-form">
+                        <div class="dialog-field">
+                            <label class="dialog-label">"Server Type"</label>
+                            <div class="server-type-selector">
+                                <button
+                                    class="type-btn"
+                                    class:active=move || edit_type.get() == ServerType::Openai
+                                    on:click=move |_| {
+                                        set_edit_type.set(ServerType::Openai);
+                                        set_edit_base.set("https://api.openai.com/v1".to_string());
+                                    }
+                                >"OpenAI"</button>
+                                <button
+                                    class="type-btn"
+                                    class:active=move || edit_type.get() == ServerType::Ollama
+                                    on:click=move |_| {
+                                        set_edit_type.set(ServerType::Ollama);
+                                        set_edit_base.set("http://localhost:11434/v1".to_string());
+                                    }
+                                >"Ollama"</button>
+                            </div>
+                        </div>
+                        <div class="dialog-field">
+                            <label class="dialog-label">"Name"</label>
+                            <input class="dialog-input" type="text" placeholder="My Server"
+                                prop:value=move || edit_name.get()
+                                on:input=move |ev| set_edit_name.set(event_target_value(&ev))
+                            />
+                        </div>
+                        <div class="dialog-field">
+                            <label class="dialog-label">"API Base URL"</label>
+                            <input class="dialog-input" type="text"
+                                placeholder=move || if edit_type.get() == ServerType::Ollama { "http://localhost:11434/v1" } else { "https://api.openai.com/v1" }
+                                prop:value=move || edit_base.get()
+                                on:input=move |ev| set_edit_base.set(event_target_value(&ev))
+                            />
+                        </div>
+                        <div class="dialog-field">
+                            <label class="dialog-label">
+                                {move || if edit_type.get() == ServerType::Ollama { "API Key (optional)" } else { "API Key" }}
+                            </label>
+                            <input class="dialog-input" type="password"
+                                placeholder=move || if edit_type.get() == ServerType::Ollama { "Leave empty for local Ollama" } else { "sk-..." }
+                                prop:value=move || edit_key.get()
+                                on:input=move |ev| set_edit_key.set(event_target_value(&ev))
+                            />
+                        </div>
+                        <div class="dialog-actions">
+                            <button class="dialog-btn dialog-btn-verify"
+                                on:click=move |_| do_verify()
+                                disabled=move || verifying.get() || edit_base.get().trim().is_empty()
+                            >
+                                {move || if verifying.get() { "Verifying..." } else { "⚡ Verify Connection" }}
+                            </button>
+                        </div>
+                        <Show when=move || verify_status.get().is_some()>
+                            {move || match verify_status.get() {
+                                Some(Ok(())) => view! { <div class="verify-success">"✅ Connection successful!"</div> }.into_any(),
+                                Some(Err(e)) => view! { <div class="verify-error">"❌ " {e}</div> }.into_any(),
+                                None => view! { <span></span> }.into_any(),
+                            }}
+                        </Show>
+                        <div class="dialog-actions">
+                            <button class="dialog-btn dialog-btn-secondary" on:click=move |_| set_editing_idx.set(None)>"Cancel"</button>
+                            <button class="dialog-btn dialog-btn-primary" on:click=move |_| save_edit()>
+                                {move || if editing_idx.get() == Some(usize::MAX) { "Add" } else { "Update" }}
+                            </button>
+                        </div>
+                    </div>
+                </Show>
+
+                <div class="dialog-footer">
+                    <button class="dialog-btn dialog-btn-secondary" on:click=move |_| set_is_open.set(false)>"Cancel"</button>
+                    <button class="dialog-btn dialog-btn-primary" on:click=move |_| do_save_all() disabled=move || saving.get()>
+                        {move || if saving.get() { "Saving..." } else { "Save All" }}
+                    </button>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+// ── Context Menu (right-click on selected text) ──
+
+#[component]
+fn ContextMenu(
+    ctx_menu: ReadSignal<Option<ContextMenuState>>,
+    set_ctx_menu: WriteSignal<Option<ContextMenuState>>,
+    set_amend_state: WriteSignal<Option<AmendState>>,
+    ai_settings: ReadSignal<AiSettings>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || ctx_menu.get().is_some() && ai_settings.get().has_active_connection()>
+            {move || {
+                let state = ctx_menu.get().unwrap();
+                let x = state.x;
+                let y = state.y;
+                let sel_start = state.sel_start;
+                let sel_end = state.sel_end;
+
+                view! {
+                    <div class="ctx-backdrop" on:click=move |_| set_ctx_menu.set(None)></div>
+                    <div class="ctx-menu" style=format!("left:{}px;top:{}px", x, y)>
+                        <button class="ctx-item" on:click=move |_| {
+                            // Get the selected text from the document
+                            let doc = web_sys::window().unwrap().document().unwrap();
+                            if let Some(textarea) = doc.query_selector("textarea.editor-textarea").ok().flatten() {
+                                let ta: web_sys::HtmlTextAreaElement = textarea.unchecked_into();
+                                let value = ta.value();
+                                let selected = value[sel_start..sel_end].to_string();
+                                set_amend_state.set(Some(AmendState {
+                                    sel_start,
+                                    sel_end,
+                                    selected_text: selected,
+                                }));
+                            }
+                            set_ctx_menu.set(None);
+                        }>"✏️ Amend"</button>
+                    </div>
+                }
+            }}
+        </Show>
+    }
+}
+
+// ── Amend Dialog ──
+
+#[component]
+fn AmendDialog(
+    amend_state: ReadSignal<Option<AmendState>>,
+    set_amend_state: WriteSignal<Option<AmendState>>,
+    content: ReadSignal<String>,
+    set_content: WriteSignal<String>,
+    set_is_dirty: WriteSignal<bool>,
+    ai_settings: ReadSignal<AiSettings>,
+    selected_model: ReadSignal<String>,
+) -> impl IntoView {
+    let (instruction, set_instruction) = signal(String::new());
+    let (loading, set_loading) = signal(false);
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    let do_amend = move || {
+        let state = match amend_state.get() {
+            Some(s) => s,
+            None => return,
+        };
+        let instr = instruction.get();
+        if instr.trim().is_empty() { return; }
+        let model = selected_model.get();
+        if model.is_empty() {
+            set_error.set(Some("Select a model in the LLM Panel first.".to_string()));
+            return;
+        }
+
+        let settings = ai_settings.get();
+        let server = match settings.active_server() {
+            Some(s) => s.clone(),
+            None => {
+                set_error.set(Some("No active server configured.".to_string()));
+                return;
+            }
+        };
+
+        set_loading.set(true);
+        set_error.set(None);
+
+        let selected_text = state.selected_text.clone();
+        let sel_start = state.sel_start;
+        let sel_end = state.sel_end;
+
+        leptos::task::spawn_local(async move {
+            let result: Result<String, _> = invoke(
+                "ai_amend",
+                &AiAmendArgs {
+                    selected_text,
+                    instruction: instr,
+                    api_base: server.api_base,
+                    api_key: server.api_key,
+                    model,
+                },
+            ).await;
+
+            match result {
+                Ok(amended) => {
+                    // Replace selection in document
+                    let doc = content.get();
+                    let mut new_content = String::new();
+                    new_content.push_str(&doc[..sel_start]);
+                    new_content.push_str(&amended);
+                    new_content.push_str(&doc[sel_end..]);
+                    set_content.set(new_content);
+                    set_is_dirty.set(true);
+                    set_amend_state.set(None);
+                    set_instruction.set(String::new());
+                    set_error.set(None);
+                }
+                Err(e) => {
+                    set_error.set(Some(format!("{}", e)));
+                }
+            }
+            set_loading.set(false);
+        });
+    };
+
+    view! {
+        <Show when=move || amend_state.get().is_some()>
+            <div class="dialog-backdrop" on:click=move |_| { set_amend_state.set(None); set_instruction.set(String::new()); }></div>
+            <div class="dialog-panel amend-dialog">
+                <h2 class="dialog-title">"✏️ Amend Selection"</h2>
+                <div class="amend-preview">
+                    <label class="dialog-label">"Selected Text"</label>
+                    <pre class="amend-selected-text">{move || amend_state.get().map(|s| s.selected_text).unwrap_or_default()}</pre>
+                </div>
+                <div class="dialog-field">
+                    <label class="dialog-label">"What changes should be made?"</label>
+                    <textarea class="dialog-input amend-instruction"
+                        placeholder="e.g. Fix grammar, make more concise, change tone to formal..."
+                        prop:value=move || instruction.get()
+                        on:input=move |ev| set_instruction.set(event_target_value(&ev))
+                        on:keydown=move |ev: ev::KeyboardEvent| {
+                            if ev.key() == "Enter" && (ev.ctrl_key() || ev.meta_key()) {
+                                ev.prevent_default();
+                                do_amend();
+                            }
+                        }
+                    ></textarea>
+                </div>
+                <Show when=move || error.get().is_some()>
+                    <div class="verify-error">{move || error.get().unwrap_or_default()}</div>
+                </Show>
+                <div class="dialog-actions">
+                    <button class="dialog-btn dialog-btn-secondary"
+                        on:click=move |_| { set_amend_state.set(None); set_instruction.set(String::new()); }
+                    >"Cancel"</button>
+                    <button class="dialog-btn dialog-btn-primary"
+                        on:click=move |_| do_amend()
+                        disabled=move || loading.get() || instruction.get().trim().is_empty()
+                    >
+                        {move || if loading.get() { "Amending..." } else { "Apply" }}
+                    </button>
+                </div>
+                <Show when=move || loading.get()>
+                    <div class="ai-loading">
+                        <div class="ai-spinner"></div>
+                        <span>"Processing..."</span>
+                    </div>
+                </Show>
+            </div>
+        </Show>
+    }
+}
+
+// ── Chat Panel (LLM Panel) ──
+
+#[component]
+fn ChatPanel(
+    is_open: ReadSignal<bool>,
+    set_is_open: WriteSignal<bool>,
+    content: ReadSignal<String>,
+    set_content: WriteSignal<String>,
+    set_is_dirty: WriteSignal<bool>,
+    ai_settings: ReadSignal<AiSettings>,
+    set_ai_settings: WriteSignal<AiSettings>,
+    selected_model: ReadSignal<String>,
+    set_selected_model: WriteSignal<String>,
+    chat_messages: ReadSignal<Vec<ChatMessage>>,
+    set_chat_messages: WriteSignal<Vec<ChatMessage>>,
+    edit_mode: ReadSignal<bool>,
+    set_edit_mode: WriteSignal<bool>,
+) -> impl IntoView {
+    let (input_text, set_input_text) = signal(String::new());
+    let (loading, set_loading) = signal(false);
+
+    // Model dropdown state
+    let (available_models, set_available_models) = signal::<Vec<String>>(vec![]);
+    let (model_filter, set_model_filter) = signal(String::new());
+    let (model_dropdown_open, set_model_dropdown_open) = signal(false);
+    let (models_loading, set_models_loading) = signal(false);
+
+    let filtered_models = Memo::new(move |_| {
+        let filter = model_filter.get().to_lowercase();
+        let all = available_models.get();
+        if filter.is_empty() { all }
+        else { all.into_iter().filter(|m| m.to_lowercase().contains(&filter)).collect() }
+    });
+
+    // Load models when panel opens
+    Effect::new(move |_| {
+        if is_open.get() {
+            let settings = ai_settings.get();
+            if let Some(server) = settings.active_server() {
+                let base = server.api_base.clone();
+                let key = server.api_key.clone();
+                set_models_loading.set(true);
+                leptos::task::spawn_local(async move {
+                    let result: Result<Vec<String>, _> = invoke(
+                        "list_models",
+                        &ListModelsArgs { api_base: base, api_key: key },
+                    ).await;
+                    if let Ok(models) = result {
+                        set_available_models.set(models);
+                    }
+                    set_models_loading.set(false);
+                });
+            }
+        }
+    });
+
+    // Persist model selection
+    let save_model_choice = move |model: String| {
+        set_selected_model.set(model.clone());
+        let mut settings = ai_settings.get();
+        settings.last_model = Some(model);
+        let settings_c = settings.clone();
+        set_ai_settings.set(settings.clone());
+        leptos::task::spawn_local(async move {
+            let _: Result<(), _> = invoke(
+                "save_ai_settings",
+                &SaveAiSettingsArgs { settings: settings_c },
+            ).await;
+        });
+    };
+
+    let do_send = move || {
+        let msg = input_text.get();
+        if msg.trim().is_empty() || loading.get() { return; }
+        let model = selected_model.get();
+        if model.is_empty() { return; }
+
+        let settings = ai_settings.get();
+        let server = match settings.active_server() {
+            Some(s) => s.clone(),
+            None => return,
+        };
+
+        // Add user message to history
+        let user_msg = ChatMessage { role: "user".to_string(), content: msg.clone() };
+        set_chat_messages.update(|msgs| msgs.push(user_msg));
+        set_input_text.set(String::new());
+        set_loading.set(true);
+
+        let all_messages = chat_messages.get();
+        let doc = content.get();
+        let is_edit = edit_mode.get();
+
+        leptos::task::spawn_local(async move {
+            let result: Result<ChatResponse, _> = invoke(
+                "ai_chat",
+                &AiChatArgs {
+                    messages: all_messages,
+                    document_content: doc,
+                    edit_mode: is_edit,
+                    api_base: server.api_base,
+                    api_key: server.api_key,
+                    model,
+                },
+            ).await;
+
+            match result {
+                Ok(resp) => {
+                    // Apply document edit if present
+                    if let Some(new_doc) = resp.document_edit {
+                        set_content.set(new_doc);
+                        set_is_dirty.set(true);
+                    }
+                    // Add assistant message
+                    let assistant_msg = ChatMessage { role: "assistant".to_string(), content: resp.message };
+                    set_chat_messages.update(|msgs| msgs.push(assistant_msg));
+                }
+                Err(e) => {
+                    let err_msg = ChatMessage { role: "assistant".to_string(), content: format!("⚠️ Error: {}", e) };
+                    set_chat_messages.update(|msgs| msgs.push(err_msg));
+                }
+            }
+            set_loading.set(false);
+        });
+    };
+
+    let clear_chat = move || {
+        set_chat_messages.set(vec![]);
+    };
+
+    view! {
+        <Show when=move || is_open.get()>
+            <div class="chat-panel">
+                <div class="chat-panel-header">
+                    <span class="chat-panel-title">"🤖 LLM Panel"</span>
+                    <div class="chat-header-actions">
+                        <button
+                            class="edit-toggle"
+                            class:active=move || edit_mode.get()
+                            on:click=move |_| set_edit_mode.set(!edit_mode.get())
+                            title=move || if edit_mode.get() { "Edit mode ON — AI can modify your document" } else { "Chat mode — AI will only discuss, not edit" }
+                        >
+                            {move || if edit_mode.get() { "✏️ Edit" } else { "💬 Chat" }}
+                        </button>
+                        <button class="chat-header-btn" on:click=move |_| clear_chat() title="Clear chat">"🗑️"</button>
+                        <button class="chat-header-btn" on:click=move |_| set_is_open.set(false) title="Close">"✕"</button>
+                    </div>
+                </div>
+
+                // Model selector
+                <div class="model-selector">
+                    <label class="model-label">"Model"</label>
+                    <div class="model-dropdown-wrap">
+                        <input
+                            class="model-dropdown-input"
+                            type="text"
+                            placeholder=move || if models_loading.get() { "Loading models..." } else { "Search models..." }
+                            prop:value=move || {
+                                if model_dropdown_open.get() { model_filter.get() }
+                                else { selected_model.get() }
+                            }
+                            on:focus=move |_| {
+                                set_model_dropdown_open.set(true);
+                                set_model_filter.set(String::new());
+                            }
+                            on:input=move |ev| {
+                                set_model_filter.set(event_target_value(&ev));
+                                set_model_dropdown_open.set(true);
+                            }
+                            on:keydown=move |ev: ev::KeyboardEvent| {
+                                if ev.key() == "Escape" { set_model_dropdown_open.set(false); }
+                            }
+                        />
+                        <Show when=move || model_dropdown_open.get()>
+                            <div class="model-dropdown-backdrop" on:click=move |_| set_model_dropdown_open.set(false)></div>
+                            <div class="model-dropdown-list">
+                                {move || {
+                                    let models = filtered_models.get();
+                                    if models.is_empty() {
+                                        vec![view! { <div class="model-dropdown-empty">"No models found"</div> }.into_any()]
+                                    } else {
+                                        models.iter().map(|m| {
+                                            let model_id = m.clone();
+                                            let model_id2 = m.clone();
+                                            let is_selected = selected_model.get() == *m;
+                                            view! {
+                                                <button
+                                                    class="model-dropdown-item"
+                                                    class:selected=is_selected
+                                                    on:mousedown=move |ev| {
+                                                        ev.prevent_default();
+                                                        save_model_choice(model_id.clone());
+                                                        set_model_dropdown_open.set(false);
+                                                    }
+                                                >
+                                                    {model_id2}
+                                                </button>
+                                            }.into_any()
+                                        }).collect::<Vec<_>>()
+                                    }
+                                }}
+                            </div>
+                        </Show>
+                    </div>
+                </div>
+
+                // Chat messages
+                <div class="chat-messages">
+                    {move || {
+                        let msgs = chat_messages.get();
+                        if msgs.is_empty() {
+                            vec![view! {
+                                <div class="chat-empty">
+                                    <div class="chat-empty-icon">"💬"</div>
+                                    <div class="chat-empty-text">"Start a conversation to get help with your document"</div>
+                                </div>
+                            }.into_any()]
+                        } else {
+                            msgs.iter().map(|msg| {
+                                let role = msg.role.clone();
+                                let content_text = msg.content.clone();
+                                let is_user = role == "user";
+                                view! {
+                                    <div class="chat-bubble" class:user=is_user class:assistant=!is_user>
+                                        <div class="chat-role">{if is_user { "You" } else { "AI" }}</div>
+                                        <div class="chat-content">
+                                            <pre class="chat-text">{content_text}</pre>
+                                        </div>
+                                    </div>
+                                }.into_any()
+                            }).collect::<Vec<_>>()
+                        }
+                    }}
+                    <Show when=move || loading.get()>
+                        <div class="chat-bubble assistant">
+                            <div class="chat-role">"AI"</div>
+                            <div class="chat-content">
+                                <div class="chat-typing">
+                                    <span class="typing-dot"></span>
+                                    <span class="typing-dot"></span>
+                                    <span class="typing-dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </Show>
+                </div>
+
+                // Input area
+                <div class="chat-input-area">
+                    <textarea
+                        class="chat-input"
+                        placeholder=move || {
+                            if selected_model.get().is_empty() { "Select a model first..." }
+                            else { "Ask about your document..." }
+                        }
+                        prop:value=move || input_text.get()
+                        on:input=move |ev| set_input_text.set(event_target_value(&ev))
+                        on:keydown=move |ev: ev::KeyboardEvent| {
+                            if ev.key() == "Enter" && !ev.shift_key() {
+                                ev.prevent_default();
+                                do_send();
+                            }
+                        }
+                        disabled=move || selected_model.get().is_empty()
+                    ></textarea>
+                    <button class="chat-send-btn"
+                        on:click=move |_| do_send()
+                        disabled=move || loading.get() || input_text.get().trim().is_empty() || selected_model.get().is_empty()
+                    >"↑"</button>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+// ── Editor with @ Insert Menu + right-click ──
+
 #[component]
 fn Editor(
     content: ReadSignal<String>,
     set_content: WriteSignal<String>,
     set_is_dirty: WriteSignal<bool>,
+    ai_settings: ReadSignal<AiSettings>,
+    _ctx_menu: ReadSignal<Option<ContextMenuState>>,
+    set_ctx_menu: WriteSignal<Option<ContextMenuState>>,
 ) -> impl IntoView {
-    // @ menu state
-    let (insert_menu_open, set_insert_menu_open) = signal(false);
-    let (insert_filter, set_insert_filter) = signal(String::new());
-    let (at_trigger_pos, set_at_trigger_pos) = signal::<Option<usize>>(None);
-    let (selected_index, set_selected_index) = signal(0usize);
-    // Textarea node ref
-    let textarea_ref = NodeRef::<leptos::html::Textarea>::new();
+    let (insert_menu, set_insert_menu) = signal::<Option<(i32, i32, usize)>>(None);
+    let (filter_text, set_filter_text) = signal(String::new());
 
-    // Filtered insert items
-    let filtered_items = Memo::new(move |_| {
-        let filter = insert_filter.get().to_lowercase();
-        let all_items = get_insert_items();
-        if filter.is_empty() {
-            all_items
-        } else {
-            all_items
-                .into_iter()
-                .filter(|item| {
-                    item.label.to_lowercase().contains(&filter)
-                        || item.description.to_lowercase().contains(&filter)
-                })
-                .collect()
-        }
-    });
-
-    // Insert the selected item into the textarea
-    let do_insert = move |item: &InsertItem| {
-        if let Some(trigger_pos) = at_trigger_pos.get() {
-            let current = content.get();
-            let filter_text = insert_filter.get();
-            // Range to replace: from '@' to '@' + filter length
-            let replace_end = trigger_pos + 1 + filter_text.len();
-            let replace_end = replace_end.min(current.len());
-
-            let mut new_content = String::with_capacity(current.len() + item.insert_text.len());
-            new_content.push_str(&current[..trigger_pos]);
-            new_content.push_str(item.insert_text);
-            new_content.push_str(&current[replace_end..]);
-
-            let cursor_pos = if let Some(offset) = item.cursor_offset {
-                trigger_pos + offset
-            } else {
-                trigger_pos + item.insert_text.len()
-            };
-
-            set_content.set(new_content);
-            set_is_dirty.set(true);
-            set_insert_menu_open.set(false);
-            set_insert_filter.set(String::new());
-            set_at_trigger_pos.set(None);
-
-            // Set cursor position after Leptos re-renders
-            let cursor = cursor_pos;
-            if let Some(el) = textarea_ref.get() {
-                let el: web_sys::HtmlTextAreaElement = el.into();
-                // Use requestAnimationFrame to set cursor after DOM update
-                let closure = wasm_bindgen::closure::Closure::once(move || {
-                    let _ = el.set_selection_range(cursor as u32, cursor as u32);
-                    let _ = el.focus();
-                });
-                web_sys::window()
-                    .unwrap()
-                    .request_animation_frame(closure.as_ref().unchecked_ref())
-                    .unwrap();
-                closure.forget();
-            }
-        }
-    };
-
-    // Handle keydown for navigation and selection in the @ menu
-    let on_keydown = move |ev: ev::KeyboardEvent| {
-        if !insert_menu_open.get() {
-            return;
-        }
-        let items = filtered_items.get();
-        let key = ev.key();
-        match key.as_str() {
-            "ArrowDown" => {
-                ev.prevent_default();
-                let len = items.len();
-                if len > 0 {
-                    set_selected_index.set((selected_index.get() + 1) % len);
-                }
-            }
-            "ArrowUp" => {
-                ev.prevent_default();
-                let len = items.len();
-                if len > 0 {
-                    let idx = selected_index.get();
-                    set_selected_index.set(if idx == 0 { len - 1 } else { idx - 1 });
-                }
-            }
-            "Enter" | "Tab" => {
-                ev.prevent_default();
-                let idx = selected_index.get();
-                if idx < items.len() {
-                    let item = items[idx].clone();
-                    do_insert(&item);
-                }
-            }
-            "Escape" => {
-                ev.prevent_default();
-                set_insert_menu_open.set(false);
-                set_insert_filter.set(String::new());
-                set_at_trigger_pos.set(None);
-            }
-            _ => {}
-        }
-    };
-
-    // Handle input to detect '@' trigger and filter text
     let on_input = move |ev: ev::Event| {
-        let target = ev.target().unwrap();
-        let el: web_sys::HtmlTextAreaElement = target.unchecked_into();
-        let val = el.value();
-        let cursor = el.selection_start().unwrap_or(None).unwrap_or(0) as usize;
-
+        let val = event_target_value(&ev);
         set_content.set(val.clone());
         set_is_dirty.set(true);
 
-        if insert_menu_open.get() {
-            // Menu is already open — update filter based on text after '@'
-            if let Some(trigger) = at_trigger_pos.get() {
-                if cursor > trigger {
-                    let filter = &val[trigger + 1..cursor];
-                    // Close if a space is typed in filter
-                    if filter.contains(' ') || filter.contains('\n') {
-                        set_insert_menu_open.set(false);
-                        set_insert_filter.set(String::new());
-                        set_at_trigger_pos.set(None);
-                    } else {
-                        set_insert_filter.set(filter.to_string());
-                        set_selected_index.set(0);
-                    }
+        let target = ev.target().unwrap().unchecked_into::<web_sys::HtmlTextAreaElement>();
+        let cursor = target.selection_start().unwrap().unwrap_or(0) as usize;
+
+        if cursor > 0 && val.as_bytes().get(cursor - 1) == Some(&b'@') {
+            // Position the insert menu near the top-left of the editor
+            set_insert_menu.set(Some((100, 100, cursor)));
+            set_filter_text.set(String::new());
+        } else if insert_menu.get().is_some() {
+            if let Some((_, _, at_pos)) = insert_menu.get() {
+                if cursor > at_pos {
+                    let typed = &val[at_pos..cursor];
+                    set_filter_text.set(typed.to_string());
                 } else {
-                    // Cursor moved before '@' — close menu
-                    set_insert_menu_open.set(false);
-                    set_insert_filter.set(String::new());
-                    set_at_trigger_pos.set(None);
-                }
-            }
-        } else if cursor > 0 {
-            // Check if '@' was just typed
-            let byte_pos = cursor - 1;
-            if byte_pos < val.len() && val.as_bytes()[byte_pos] == b'@' {
-                // Only trigger if at start of line or preceded by whitespace
-                let preceded_by_space = byte_pos == 0
-                    || val.as_bytes()[byte_pos - 1] == b' '
-                    || val.as_bytes()[byte_pos - 1] == b'\n';
-                if preceded_by_space {
-                    set_at_trigger_pos.set(Some(byte_pos));
-                    set_insert_filter.set(String::new());
-                    set_insert_menu_open.set(true);
-                    set_selected_index.set(0);
+                    set_insert_menu.set(None);
                 }
             }
         }
     };
 
+    let on_contextmenu = move |ev: ev::MouseEvent| {
+        let target = ev.target().unwrap().unchecked_into::<web_sys::HtmlTextAreaElement>();
+        let start = target.selection_start().unwrap().unwrap_or(0) as usize;
+        let end = target.selection_end().unwrap().unwrap_or(0) as usize;
+
+        if end > start && ai_settings.get().has_active_connection() {
+            ev.prevent_default();
+            set_ctx_menu.set(Some(ContextMenuState {
+                x: ev.client_x(),
+                y: ev.client_y(),
+                sel_start: start,
+                sel_end: end,
+            }));
+        }
+    };
+
+    let on_keydown = move |ev: ev::KeyboardEvent| {
+        if ev.key() == "Escape" {
+            set_insert_menu.set(None);
+        }
+    };
+
+    let insert_item = move |snippet: &str| {
+        if let Some((_, _, at_pos)) = insert_menu.get() {
+            let val = content.get();
+            let cursor = at_pos;
+            let before = &val[..cursor - 1]; // remove @
+            let after = &val[cursor + filter_text.get().len()..];
+            let new_val = format!("{}{}{}", before, snippet, after);
+            set_content.set(new_val);
+            set_is_dirty.set(true);
+        }
+        set_insert_menu.set(None);
+    };
+
     view! {
-        <div class="editor-container">
-            <div class="editor-gutter">
-                <span class="pilcrow">"¶"</span>
-            </div>
-            <div class="editor-wrapper">
-                <textarea
-                    class="editor-textarea"
-                    placeholder="Type @ to insert"
-                    prop:value=move || content.get()
-                    on:input=on_input
-                    on:keydown=on_keydown
-                    node_ref=textarea_ref
-                ></textarea>
-                <InsertMenuPopup
-                    is_open=insert_menu_open
-                    items=filtered_items
-                    selected_index=selected_index
-                    on_select=move |item: InsertItem| {
-                        do_insert(&item);
-                    }
-                    on_close=move || {
-                        set_insert_menu_open.set(false);
-                        set_insert_filter.set(String::new());
-                        set_at_trigger_pos.set(None);
-                        // Re-focus the textarea
-                        if let Some(el) = textarea_ref.get() {
-                            let el: web_sys::HtmlTextAreaElement = el.into();
-                            let _ = el.focus();
-                        }
-                    }
-                />
-            </div>
+        <div class="editor-pane">
+            <textarea
+                class="editor-textarea"
+                placeholder="Start writing markdown..."
+                prop:value=move || content.get()
+                on:input=on_input
+                on:contextmenu=on_contextmenu
+                on:keydown=on_keydown
+                spellcheck="false"
+            ></textarea>
+            <InsertMenuPopup
+                insert_menu=insert_menu
+                set_insert_menu=set_insert_menu
+                filter_text=filter_text
+                insert_item=insert_item
+            />
         </div>
     }
 }
 
-// ── InsertMenuPopup ──
+// ── Insert menu popup ──
 
-/// Popup menu showing filterable markdown syntax items, triggered by typing '@'.
 #[component]
 fn InsertMenuPopup(
-    is_open: ReadSignal<bool>,
-    items: Memo<Vec<InsertItem>>,
-    selected_index: ReadSignal<usize>,
-    on_select: impl Fn(InsertItem) + 'static + Copy + Send + Sync,
-    on_close: impl Fn() + 'static + Copy + Send + Sync,
+    insert_menu: ReadSignal<Option<(i32, i32, usize)>>,
+    set_insert_menu: WriteSignal<Option<(i32, i32, usize)>>,
+    filter_text: ReadSignal<String>,
+    insert_item: impl Fn(&str) + 'static + Copy + Send + Sync,
 ) -> impl IntoView {
     view! {
-        <Show when=move || is_open.get()>
-            <div class="insert-menu-backdrop" on:click=move |_| on_close()></div>
-            <div class="insert-menu">
-                <div class="insert-menu-header">
-                    <span class="insert-menu-title">"Insert block"</span>
-                    <span class="insert-menu-hint">"Filter by typing"</span>
-                </div>
-                <div class="insert-menu-list">
-                    {move || {
-                        let current_items = items.get();
-                        if current_items.is_empty() {
-                            vec![
-                                view! {
-                                    <div class="insert-menu-empty">"No matches"</div>
-                                }.into_any()
-                            ]
-                        } else {
-                            current_items
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, item)| {
-                                    let item_clone = item.clone();
-                                    let is_selected = move || selected_index.get() == idx;
-                                    let icon = item.icon;
-                                    let label = item.label;
-                                    let desc = item.description;
-                                    view! {
-                                        <button
-                                            class="insert-menu-item"
-                                            class:selected=is_selected
-                                            on:mousedown=move |ev| {
-                                                ev.prevent_default();
-                                                on_select(item_clone.clone());
-                                            }
-                                        >
-                                            <span class="insert-menu-item-icon">{icon}</span>
-                                            <div class="insert-menu-item-text">
-                                                <span class="insert-menu-item-label">{label}</span>
-                                                <span class="insert-menu-item-desc">{desc}</span>
-                                            </div>
-                                        </button>
-                                    }.into_any()
-                                })
-                                .collect::<Vec<_>>()
-                        }
-                    }}
-                </div>
-            </div>
+        <Show when=move || insert_menu.get().is_some()>
+            {move || {
+                let (x, y, _) = insert_menu.get().unwrap();
+                let ft = filter_text.get().to_lowercase();
+                let items: Vec<_> = INSERT_ITEMS.iter()
+                    .filter(|item| ft.is_empty() || item.label.to_lowercase().contains(&ft))
+                    .collect();
+                view! {
+                    <div class="insert-menu-backdrop" on:click=move |_| set_insert_menu.set(None)></div>
+                    <div class="insert-menu" style=format!("left:{}px;top:{}px", x, y)>
+                        {items.into_iter().map(|item| {
+                            let snippet = item.snippet.to_string();
+                            view! {
+                                <button class="insert-menu-item" on:mousedown=move |ev| {
+                                    ev.prevent_default();
+                                    insert_item(&snippet);
+                                }>
+                                    <div class="insert-menu-item-icon">{item.icon}</div>
+                                    <div class="insert-menu-item-text">
+                                        <div class="insert-menu-item-label">{item.label}</div>
+                                        <div class="insert-menu-item-desc">{item.desc}</div>
+                                    </div>
+                                </button>
+                            }
+                        }).collect::<Vec<_>>()}
+                    </div>
+                }
+            }}
         </Show>
     }
 }
