@@ -9,10 +9,11 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
+        "height": 700,
         "resizable": true,
-        "title": "tauri-leptos-example",
-        "width": 800
+        "title": "WriterMD",
+        "width": 1024,
+        "decorations": false
       }
     ],
     "withGlobalTauri": true
@@ -60,11 +61,11 @@
       "timestampUrl": ""
     }
   },
-  "identifier": "cz.michalvavra.taurileptosexample",
+  "identifier": "com.writermd.app",
   "plugins": {
     "cli": {},
     "updater": {}
   },
-  "productName": "tauri-leptos-example",
+  "productName": "WriterMD",
   "version": "0.0.0"
 }
