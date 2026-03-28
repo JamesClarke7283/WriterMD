@@ -1563,6 +1563,7 @@ fn InsertMenuPopup(
     insert_menu: ReadSignal<Option<(i32, i32, usize)>>,
     set_insert_menu: WriteSignal<Option<(i32, i32, usize)>>,
     filter_text: ReadSignal<String>,
+    selected_index: ReadSignal<usize>,
     #[prop(into)] insert_item: Callback<&'static str, ()>,
 ) -> impl IntoView {
     let filtered_items = move || {
@@ -1578,31 +1579,36 @@ fn InsertMenuPopup(
             {move || {
                 let (x, y, _) = insert_menu.get().unwrap();
                 let style = format!("left: {}px; top: {}px;", x, y);
+                let sel = selected_index.get();
 
                 view! {
                     <div class="insert-menu-backdrop" on:click=move |_| set_insert_menu.set(None)></div>
                     <div class="insert-menu" style=style>
                         <div class="insert-menu-header">
                             <span class="insert-menu-title">"Insert"</span>
-                            <span class="insert-menu-hint">"Press Esc to close"</span>
+                            <span class="insert-menu-hint">"↑↓ navigate · Enter select · Esc close"</span>
                         </div>
                         <div class="insert-menu-list">
-                            <For
-                                each=filtered_items
-                                key=|item| item.label
-                                children={move |item| {
+                            {move || {
+                                let items = filtered_items();
+                                items.iter().enumerate().map(|(idx, item)| {
                                     let snippet = item.snippet;
+                                    let is_selected = idx == sel;
                                     view! {
-                                        <button class="insert-menu-item" on:click=move |_| insert_item.run(snippet)>
+                                        <button
+                                            class="insert-menu-item"
+                                            class:selected=is_selected
+                                            on:click=move |_| insert_item.run(snippet)
+                                        >
                                             <div class="insert-menu-item-icon">{item.icon.to_string()}</div>
                                             <div class="insert-menu-item-text">
                                                 <div class="insert-menu-item-label">{item.label.to_string()}</div>
                                                 <div class="insert-menu-item-desc">{item.desc.to_string()}</div>
                                             </div>
                                         </button>
-                                    }
-                                }}
-                            />
+                                    }.into_any()
+                                }).collect::<Vec<_>>()
+                            }}
                         </div>
                     </div>
                 }
@@ -1626,6 +1632,7 @@ fn Editor(
     let editor_state = wysiwym::EditorState::new(&content.get_untracked());
     let (insert_menu, set_insert_menu) = signal::<Option<(i32, i32, usize)>>(None);
     let (filter_text, set_filter_text) = signal(String::new());
+    let (menu_selected, set_menu_selected) = signal(0usize);
 
     Effect::new(move |_| {
         let current_text = content.get();
@@ -1673,13 +1680,49 @@ fn Editor(
     let on_at_menu: Callback<(i32, i32, usize), ()> = Callback::new(move |(x, y, cursor)| {
         set_insert_menu.set(Some((x, y, cursor)));
         set_filter_text.set(String::new());
+        set_menu_selected.set(0);
     });
 
     let on_keydown = move |ev: ev::KeyboardEvent| {
-        if insert_menu.get().is_some() && ev.key() == "Escape" {
-            set_insert_menu.set(None);
-            ev.prevent_default();
-            return;
+        if insert_menu.get().is_some() {
+            let key = ev.key();
+            if key == "Escape" {
+                set_insert_menu.set(None);
+                ev.prevent_default();
+                return;
+            }
+            if key == "ArrowDown" {
+                ev.prevent_default();
+                let query = filter_text.get().to_lowercase();
+                let count = INSERT_ITEMS.iter().filter(|i| i.label.to_lowercase().contains(&query)).count();
+                if count > 0 {
+                    set_menu_selected.update(|s| {
+                        if *s + 1 < count { *s += 1; } else { *s = 0; }
+                    });
+                }
+                return;
+            }
+            if key == "ArrowUp" {
+                ev.prevent_default();
+                let query = filter_text.get().to_lowercase();
+                let count = INSERT_ITEMS.iter().filter(|i| i.label.to_lowercase().contains(&query)).count();
+                if count > 0 {
+                    set_menu_selected.update(|s| {
+                        if *s > 0 { *s -= 1; } else { *s = count - 1; }
+                    });
+                }
+                return;
+            }
+            if key == "Enter" {
+                ev.prevent_default();
+                let query = filter_text.get().to_lowercase();
+                let items: Vec<_> = INSERT_ITEMS.iter().filter(|i| i.label.to_lowercase().contains(&query)).collect();
+                let sel = menu_selected.get();
+                if sel < items.len() {
+                    insert_item(items[sel].snippet);
+                }
+                return;
+            }
         }
         if ev.ctrl_key() || ev.meta_key() {
             if ev.key() == "z" {
@@ -1728,6 +1771,7 @@ fn Editor(
                 insert_menu=insert_menu
                 set_insert_menu=set_insert_menu
                 filter_text=filter_text
+                selected_index=menu_selected
                 insert_item=insert_item
             />
         </div>
