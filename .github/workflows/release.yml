@@ -59,8 +59,59 @@ jobs:
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
 
+  frontend-assets:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_TERM_COLOR: always
+      NO_COLOR: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Add cargo bin directory to PATH
+        shell: bash
+        run: echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --allow-downgrade
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install frontend build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install --locked trunk
+          cargo install --locked wasm-bindgen-cli
+          npm install --global --save-exact esbuild
+          npm install --global tailwindcss
+          npm install --global --save-exact sass
+
+      - name: Build frontend assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          NO_COLOR=false trunk build
+
+      - name: Upload frontend assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: src-ui/dist
+          if-no-files-found: error
+
   build:
-    needs: prepare
+    needs:
+      - prepare
+      - frontend-assets
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +208,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo fetch
+
+      - name: Download frontend assets
+        if: matrix.os_name == 'windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: src-ui/dist
 
       - name: Build release bundles
         shell: bash
