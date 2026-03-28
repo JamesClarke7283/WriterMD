@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use src_ui::*;
+use writermd_ui::*;
 
 pub fn main() {
     _ = console_log::init_with_level(log::Level::Debug);

@@ -1,6 +1,6 @@
 [package]
-name = "src_tauri"
-version = "0.1.0"
+name = "writermd"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["James David Clarke <james@jamesdavidclarke.com>"]
 license = "GPL-3.0-or-later"

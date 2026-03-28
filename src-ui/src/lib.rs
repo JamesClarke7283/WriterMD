@@ -72,11 +72,51 @@ impl AiSettings {
     }
 }
 
-// Chat message
+// Chat message (API-facing, for serializing to backend)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatMessage {
     role: String,
     content: String,
+}
+
+// UI chat message — supports multiple response variants for assistant retries
+#[derive(Debug, Clone)]
+struct UiChatMessage {
+    role: String,
+    /// All response variants (for user messages this is always a single entry)
+    variants: Vec<String>,
+    /// Which variant is currently displayed
+    active_variant: usize,
+}
+
+impl UiChatMessage {
+    fn user(content: String) -> Self {
+        Self {
+            role: "user".to_string(),
+            variants: vec![content],
+            active_variant: 0,
+        }
+    }
+
+    fn assistant(content: String) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            variants: vec![content],
+            active_variant: 0,
+        }
+    }
+
+    fn active_content(&self) -> &str {
+        &self.variants[self.active_variant]
+    }
+
+    /// Convert to API ChatMessage using the active variant
+    fn to_api(&self) -> ChatMessage {
+        ChatMessage {
+            role: self.role.clone(),
+            content: self.active_content().to_string(),
+        }
+    }
 }
 
 // Chat response from backend
@@ -271,7 +311,7 @@ pub fn App() -> impl IntoView {
     let (amend_state, set_amend_state) = signal::<Option<AmendState>>(None);
 
     // Chat history
-    let (chat_messages, set_chat_messages) = signal::<Vec<ChatMessage>>(vec![]);
+    let (chat_messages, set_chat_messages) = signal::<Vec<UiChatMessage>>(vec![]);
 
     // Load settings on mount
     Effect::new(move |_| {
@@ -1038,8 +1078,8 @@ fn ChatPanel(
     set_ai_settings: WriteSignal<AiSettings>,
     selected_model: ReadSignal<String>,
     set_selected_model: WriteSignal<String>,
-    chat_messages: ReadSignal<Vec<ChatMessage>>,
-    set_chat_messages: WriteSignal<Vec<ChatMessage>>,
+    chat_messages: ReadSignal<Vec<UiChatMessage>>,
+    set_chat_messages: WriteSignal<Vec<UiChatMessage>>,
     edit_mode: ReadSignal<bool>,
     set_edit_mode: WriteSignal<bool>,
 ) -> impl IntoView {
@@ -1125,15 +1165,12 @@ fn ChatPanel(
         };
 
         // Add user message to history
-        let user_msg = ChatMessage {
-            role: "user".to_string(),
-            content: msg.clone(),
-        };
+        let user_msg = UiChatMessage::user(msg.clone());
         set_chat_messages.update(|msgs| msgs.push(user_msg));
         set_input_text.set(String::new());
         set_loading.set(true);
 
-        let all_messages = chat_messages.get();
+        let all_messages: Vec<ChatMessage> = chat_messages.get().iter().map(|m| m.to_api()).collect();
         let doc = content.get();
         let is_edit = edit_mode.get();
 
@@ -1169,17 +1206,11 @@ fn ChatPanel(
                             }
                         }
                     }
-                    let assistant_msg = ChatMessage {
-                        role: "assistant".to_string(),
-                        content: msg_content,
-                    };
+                    let assistant_msg = UiChatMessage::assistant(msg_content);
                     set_chat_messages.update(|msgs| msgs.push(assistant_msg));
                 }
                 Err(e) => {
-                    let err_msg = ChatMessage {
-                        role: "assistant".to_string(),
-                        content: format!("⚠️ Error: {}", e),
-                    };
+                    let err_msg = UiChatMessage::assistant(format!("⚠️ Error: {}", e));
                     set_chat_messages.update(|msgs| msgs.push(err_msg));
                 }
             }
@@ -1197,6 +1228,93 @@ fn ChatPanel(
 
     let clear_chat = move || {
         set_chat_messages.set(vec![]);
+    };
+
+    // Retry: re-send the user message that's just before the given assistant message index
+    let do_retry = move |assistant_idx: usize| {
+        if loading.get() {
+            return;
+        }
+        let model = selected_model.get();
+        if model.is_empty() {
+            return;
+        }
+        let settings = ai_settings.get();
+        let server = match settings.active_server() {
+            Some(s) => s.clone(),
+            None => return,
+        };
+
+        // Gather API messages up to (but NOT including) the assistant message at assistant_idx
+        let api_messages: Vec<ChatMessage> = chat_messages
+            .get()
+            .iter()
+            .take(assistant_idx)
+            .map(|m| m.to_api())
+            .collect();
+
+        let doc = content.get();
+        let is_edit = edit_mode.get();
+        set_loading.set(true);
+
+        leptos::task::spawn_local(async move {
+            let result: Result<ChatResponse, _> = invoke(
+                "ai_chat",
+                &AiChatArgs {
+                    messages: api_messages,
+                    document_content: doc,
+                    edit_mode: is_edit,
+                    api_base: server.api_base,
+                    api_key: server.api_key,
+                    model,
+                },
+            )
+            .await;
+
+            match result {
+                Ok(resp) => {
+                    let had_edit = resp.document_edit.is_some();
+                    if let Some(new_doc) = resp.document_edit {
+                        set_content.set(new_doc);
+                        set_is_dirty.set(true);
+                    }
+                    let mut msg_content = resp.message;
+                    if had_edit {
+                        if let Some(diff_text) = resp.diff {
+                            if !diff_text.trim().is_empty() {
+                                msg_content.push_str("\n\n📝 Changes:\n");
+                                msg_content.push_str(&diff_text);
+                            }
+                        }
+                    }
+                    // Append new variant to the existing assistant message
+                    set_chat_messages.update(|msgs| {
+                        if let Some(msg) = msgs.get_mut(assistant_idx) {
+                            msg.variants.push(msg_content);
+                            msg.active_variant = msg.variants.len() - 1;
+                        }
+                    });
+                }
+                Err(e) => {
+                    // Append error as another variant
+                    set_chat_messages.update(|msgs| {
+                        if let Some(msg) = msgs.get_mut(assistant_idx) {
+                            msg.variants.push(format!("⚠️ Error: {}", e));
+                            msg.active_variant = msg.variants.len() - 1;
+                        }
+                    });
+                }
+            }
+            set_loading.set(false);
+
+            // Auto-scroll
+            {
+                let doc = web_sys::window().unwrap().document().unwrap();
+                if let Some(el) = doc.query_selector(".chat-messages").ok().flatten() {
+                    el.set_scroll_top(el.scroll_height());
+                }
+            }
+        });
     };
 
     let mode_label = move || {
@@ -1312,10 +1430,12 @@ fn ChatPanel(
                                 </div>
                             }.into_any()]
                         } else {
-                            msgs.iter().map(|msg| {
+                            msgs.iter().enumerate().map(|(msg_idx, msg)| {
                                 let role = msg.role.clone();
-                                let content_text = msg.content.clone();
+                                let content_text = msg.active_content().to_string();
                                 let is_user = role == "user";
+                                let variant_count = msg.variants.len();
+                                let active_variant = msg.active_variant;
 
                                 // For assistant messages, split out diff section
                                 let (text_part, diff_part) = if !is_user {
@@ -1332,6 +1452,9 @@ fn ChatPanel(
 
                                 let has_diff = diff_part.is_some();
                                 let diff_text = diff_part.unwrap_or_default();
+                                let show_controls = !is_user;
+                                let has_variants = variant_count > 1;
+                                let is_last_variant = active_variant == variant_count - 1;
 
                                 view! {
                                     <div class="chat-bubble" class:user=is_user class:assistant=!is_user>
@@ -1343,6 +1466,49 @@ fn ChatPanel(
                                                 <pre class="chat-diff">{diff_text.clone()}</pre>
                                             </Show>
                                         </div>
+                                        <Show when=move || show_controls>
+                                            <div class="chat-bubble-actions">
+                                                <Show when=move || has_variants>
+                                                    <div class="chat-variant-nav">
+                                                        <button
+                                                            class="chat-variant-btn"
+                                                            disabled=move || active_variant == 0
+                                                            on:click=move |_| {
+                                                                set_chat_messages.update(|msgs| {
+                                                                    if let Some(m) = msgs.get_mut(msg_idx) {
+                                                                        if m.active_variant > 0 {
+                                                                            m.active_variant -= 1;
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        >"‹"</button>
+                                                        <span class="chat-variant-counter">
+                                                            {format!("{}/{}", active_variant + 1, variant_count)}
+                                                        </span>
+                                                        <button
+                                                            class="chat-variant-btn"
+                                                            disabled=move || is_last_variant
+                                                            on:click=move |_| {
+                                                                set_chat_messages.update(|msgs| {
+                                                                    if let Some(m) = msgs.get_mut(msg_idx) {
+                                                                        if m.active_variant < m.variants.len() - 1 {
+                                                                            m.active_variant += 1;
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        >"›"</button>
+                                                    </div>
+                                                </Show>
+                                                <button
+                                                    class="chat-retry-btn"
+                                                    title="Retry this response"
+                                                    disabled=move || loading.get()
+                                                    on:click=move |_| do_retry(msg_idx)
+                                                >"↻"</button>
+                                            </div>
+                                        </Show>
                                     </div>
                                 }.into_any()
                             }).collect::<Vec<_>>()
