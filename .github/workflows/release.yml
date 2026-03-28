@@ -91,13 +91,13 @@ jobs:
             target: x86_64-pc-windows-msvc
             os_name: windows
             arch: x86_64
-            bundles: nsis
+            bundles: ""
             artifact_name: windows-x86_64
           - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             os_name: windows
             arch: arm64
-            bundles: nsis
+            bundles: ""
             artifact_name: windows-arm64
     runs-on: ${{ matrix.runner }}
     env:
@@ -162,7 +162,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo tauri build --ci --no-sign --bundles "${{ matrix.bundles }}" --target "${{ matrix.target }}"
+          if [[ "${{ matrix.os_name }}" == "windows" ]]; then
+            cargo tauri build --ci --no-sign --no-bundle --target "${{ matrix.target }}"
+          else
+            cargo tauri build --ci --no-sign --bundles "${{ matrix.bundles }}" --target "${{ matrix.target }}"
+          fi
 
       - name: Stage release artifacts
         shell: bash
@@ -188,7 +192,7 @@ jobs:
               cp "${bundle_dir}/dmg/"*.dmg "${stage_dir}/WriterMD_${VERSION}_${OS_NAME}_${ARCH}.dmg"
               ;;
             windows)
-              cp "${bundle_dir}/nsis/"*.exe "${stage_dir}/WriterMD_${VERSION}_${OS_NAME}_${ARCH}.exe"
+              cp "target/${TARGET}/release/src_tauri.exe" "${stage_dir}/WriterMD_${VERSION}_${OS_NAME}_${ARCH}.exe"
               ;;
             *)
               echo "Unsupported OS ${OS_NAME}" >&2
