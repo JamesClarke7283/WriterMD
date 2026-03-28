@@ -64,8 +64,8 @@ PATH="$HOME/.cargo/bin:$PATH" cargo tauri icon src-tauri/icons/app-icon.png --ou
 - Linux `arm64`: AppImage, `.deb`, `.rpm`
 - macOS `x86_64`: `.dmg`
 - macOS `arm64`: `.dmg`
-- Windows `x86_64`: `.msi`
-- Windows `arm64`: `.msi`
+- Windows `x86_64`: NSIS `.exe`
+- Windows `arm64`: NSIS `.exe`
 
 ### Arch Linux AppImage workaround
 

@@ -19,7 +19,7 @@
 - AI UX direction: use a docked chat sidebar with explicit Chat and Edit modes instead of a hidden drawer-style panel.
 - Release direction: `src-tauri/icons/app-icon.png` is the source icon; regenerate the Tauri icon set from it with `cargo tauri icon` when the app icon changes.
 - Release direction: desktop release/version tags must be `v<src-tauri version>` and GitHub Releases are derived from `src-tauri/Cargo.toml`.
-- Release direction: publish Linux AppImage/DEB/RPM plus macOS DMG and Windows MSI for both `x86_64` and `arm64`.
+- Release direction: publish Linux AppImage/DEB/RPM plus macOS DMG and Windows NSIS installers for both `x86_64` and `arm64`.
 - Arch Linux packaging note: Tauri AppImage bundling may require an upstream `linuxdeploy-plugin-appimage` binary on `PATH` even when the `linuxdeploy-appimage` package is installed; prefer placing it in `~/.local/bin`.
 - Arch Linux packaging note: keep an in-repo helper to patch Tauri's cached AppImage tooling for `NO_STRIP` builds and the GTK `gdk-pixbuf` path mismatch.
 - Arch Linux packaging note: after local AppImage bundling, run the in-repo runtime patcher so the AppImage uses the host GTK/WebKit stack instead of the broken bundled GTK runtime.
