@@ -158,7 +158,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo fetch --locked
+          cargo fetch
 
       - name: Build release bundles
         shell: bash
