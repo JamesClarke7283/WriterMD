@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ matrix.os_name }}" == "windows" ]]; then
-            cargo tauri build --ci --no-sign --no-bundle --target "${{ matrix.target }}"
+            cargo tauri build --ci --no-sign --no-bundle --target "${{ matrix.target }}" --config '{"build":{"beforeBuildCommand":""}}'
           else
             cargo tauri build --ci --no-sign --bundles "${{ matrix.bundles }}" --target "${{ matrix.target }}"
           fi
