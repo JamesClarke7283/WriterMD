@@ -250,7 +250,7 @@ jobs:
               cp "${bundle_dir}/dmg/"*.dmg "${stage_dir}/WriterMD_${VERSION}_${OS_NAME}_${ARCH}.dmg"
               ;;
             windows)
-              cp "target/${TARGET}/release/src_tauri.exe" "${stage_dir}/WriterMD_${VERSION}_${OS_NAME}_${ARCH}.exe"
+              cp "target/${TARGET}/release/WriterMD.exe" "${stage_dir}/WriterMD_${VERSION}_${OS_NAME}_${ARCH}.exe"
               ;;
             *)
               echo "Unsupported OS ${OS_NAME}" >&2
