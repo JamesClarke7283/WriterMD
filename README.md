@@ -1,4 +1,5 @@
 # WriterMD
+<img width="1024" height="700" alt="image" src="https://github.com/user-attachments/assets/3e044c61-b5d9-4488-98a4-b8eec879b42d" />
 
 A clean, distraction-free Markdown editor built with [Tauri](https://tauri.app/) + [Leptos](https://leptos.dev/).
 
